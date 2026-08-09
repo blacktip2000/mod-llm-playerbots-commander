@@ -50,3 +50,9 @@ local.properties
 .cproject
 .vscode
 .idea
+
+#
+# LLM bots
+#
+conf/env.llm
+conf/mod_llm_bots.conf

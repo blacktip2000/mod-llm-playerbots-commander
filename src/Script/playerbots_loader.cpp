@@ -7,5 +7,13 @@
 // From SC
 void AddPlayerbotsScripts();
 
+// LLM bots (src/LlmBots). Registers its own PlayerScript/WorldScript/
+// CommandScript; inert unless LlmBots.Enable = 1.
+void AddLlmBotsScripts();
+
 // Add all
-void Addmod_playerbotsScripts() { AddPlayerbotsScripts(); }
+void Addmod_playerbotsScripts()
+{
+    AddPlayerbotsScripts();
+    AddLlmBotsScripts();
+}
