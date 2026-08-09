@@ -1,0 +1,121 @@
+###############################################################################
+# mod-llm-bots configuration
+#
+# Every option below can be overridden by an environment variable (env wins
+# over the file). The variable name is AC_ + the option name in upper snake
+# case, e.g. LlmBots.Foundry.Endpoint -> AC_LLM_BOTS_FOUNDRY_ENDPOINT.
+#
+# Secrets (ApiKey) should only be set via the environment, never in a file
+# that could be committed.
+#
+# Keys deliberately avoid digits: IniKeyToEnvVarKey inserts an underscore on
+# both sides of a letter/digit boundary, so "Tier1" would become TIER_1_.
+###############################################################################
+
+# Master switch. When 0 the module does nothing; all bots behave as plain
+# playerbots.
+LlmBots.Enable = 0
+
+# Provider: "openai" (OpenAI Responses API), "foundry" (Microsoft Foundry /
+# Azure OpenAI REST) or "mock" (canned schema-valid responses, no network -
+# for testing).
+LlmBots.Provider = openai
+
+# Account that holds the roster characters. This account MUST NOT be one of
+# the random-bot accounts (RandomBotAccountPrefix): random-bot rotation is
+# account-gated, and a roster bot on a non-random account is never logged out
+# by RandomPlayerbotMgr.
+LlmBots.BotAccount = llmbots
+
+# ---------------------------------------------------------------------------
+# OpenAI provider (default; used when LlmBots.Provider = openai)
+# ---------------------------------------------------------------------------
+
+# Base endpoint. Defaults to the OpenAI API; override only for a proxy.
+# The provider appends /v1/responses (the Responses API).
+LlmBots.Openai.Endpoint = https://api.openai.com
+
+# API key. Secret - set via AC_LLM_BOTS_OPENAI_API_KEY.
+LlmBots.Openai.ApiKey =
+
+# Model names (the "model" field in the request body).
+# Fast = small/cheap model for Tier 1 social calls; Think = larger model for
+# Tier 2 planning and memory reflection.
+LlmBots.Openai.ModelFast =
+LlmBots.Openai.ModelThink =
+
+# HTTP timeout for a single request, milliseconds.
+LlmBots.Openai.TimeoutMs = 30000
+
+# ---------------------------------------------------------------------------
+# Foundry provider (only used when LlmBots.Provider = foundry)
+# ---------------------------------------------------------------------------
+
+# Base endpoint. Either https://<resource>.openai.azure.com (Azure OpenAI
+# resource) or https://<resource>.services.ai.azure.com (Foundry resource).
+# The provider appends /openai/v1/chat/completions.
+LlmBots.Foundry.Endpoint = https://YOUR-RESOURCE.openai.azure.com
+
+# API key for the resource. Secret - set via AC_LLM_BOTS_FOUNDRY_API_KEY.
+LlmBots.Foundry.ApiKey =
+
+# Deployment names (the value of the "model" field in the request body).
+# Fast = small/cheap model for Tier 1 social calls; Think = larger model for
+# Tier 2 planning and memory reflection.
+LlmBots.Foundry.DeploymentFast = gpt-4.1-mini
+LlmBots.Foundry.DeploymentThink = gpt-4.1
+
+# HTTP timeout for a single request, milliseconds.
+LlmBots.Foundry.TimeoutMs = 30000
+
+# ---------------------------------------------------------------------------
+# Mock provider (only used when LlmBots.Provider = mock)
+# ---------------------------------------------------------------------------
+
+# Percentage of mock calls that fail with a transient error, to exercise the
+# retry / circuit-breaker / canned-fallback paths in testing. 0 = never fail.
+LlmBots.Mock.FailChance = 0
+
+# ---------------------------------------------------------------------------
+# Budget - a call must pass every gate. Defaults target ~13 requests/min and
+# ~8k tokens/min for a 20-bot roster (Azure ties RPM to TPM at 6 RPM per
+# 1,000 TPM, so provision 10k TPM on the fast deployment).
+# ---------------------------------------------------------------------------
+
+# Worker threads doing blocking HTTPS calls.
+LlmBots.WorkerThreads = 3
+
+# Global ceiling on LLM calls per minute (token bucket, burst of 4). When
+# empty, calls are refused - nothing is queued.
+LlmBots.MaxCallsPerMinute = 20
+
+# Rolling token budget per hour (prompt + completion). At 80% only Tier 1
+# calls are allowed; at 100% everything degrades to plain playerbot behaviour.
+LlmBots.MaxTokensPerHour = 600000
+
+# Hard cap on the roster size.
+LlmBots.MaxRosterSize = 20
+
+# ---------------------------------------------------------------------------
+# Cadence
+# ---------------------------------------------------------------------------
+
+# Minimum seconds between Tier 1 (social) calls per bot.
+LlmBots.Social.CooldownSec = 20
+
+# Seconds between Tier 2 (goal planning) calls per bot.
+LlmBots.Plan.IntervalSec = 300
+
+# Max turns in a bot-to-bot conversation before it ends with a canned sign-off.
+LlmBots.Conversation.MaxTurns = 4
+
+# ---------------------------------------------------------------------------
+# Chronicler (observer bot type)
+# ---------------------------------------------------------------------------
+
+# Character name of the chronicler (must be on the roster, type chronicler).
+LlmBots.Chronicler.Name =
+
+# Minimum seconds between chronicler digest refreshes. Whispers within the
+# cache window are answered from cache with zero LLM calls.
+LlmBots.Chronicler.DigestSec = 60
