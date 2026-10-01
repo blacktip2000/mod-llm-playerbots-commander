@@ -5,6 +5,7 @@
  */
 
 #include "TravelNode.h"
+#include "PlayerbotsDatabase.h"
 
 #include <iomanip>
 #include <regex>

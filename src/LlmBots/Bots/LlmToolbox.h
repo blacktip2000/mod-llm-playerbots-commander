@@ -1,4 +1,12 @@
 /*
+ * Modified distribution: mod-playerbots-llm-commander.
+ * This file differs from bigr00/mod-llm-playerbots c0ba652.
+ * Modified version published on 2026-10-01.
+ * Modification notice added on 2026-10-01.
+ * Publication date does not identify every historical edit date.
+ * Original copyright and license notices remain in effect.
+ */
+/*
  * This file is part of the LLM bots feature of mod-playerbots (AzerothCore).
  *
  * The tools a bot may call to look at the world.
@@ -29,10 +37,14 @@ class LlmChatLog;
 // lifetime; built once on first use.
 std::vector<ToolSpec> const& SocialToolSpecs();
 
-// Run one tool against a live bot and return its result as a JSON string.
-// Never throws: an unknown tool or a bad argument object comes back as a JSON
-// object with an "error" field, which the model can read and recover from.
-std::string ExecuteTool(Player* bot, ToolCall const& call, LlmChatLog const* chatLog);
+// Action tool declarations available only to the configured commander brain.
+// Ordinary roster bots receive only the read-only social tools.
+std::vector<ToolSpec> const& CommanderToolSpecs();
+
+// Run one tool for a live LLM bot. For commander tools, issuer is the human
+// player who gave the natural-language instruction to the commander bot.
+// Never throws: failures are returned as JSON error objects.
+std::string ExecuteTool(Player* bot, ToolCall const& call, LlmChatLog const* chatLog, Player* issuer);
 
 } // namespace LlmBots
 

@@ -1,5 +1,13 @@
 /*
  * This file is part of the LLM bots feature of mod-playerbots (AzerothCore).
+ *
+ * Modified in mod-playerbots-llm-commander:
+ * Commander-specific action tools and response handling.
+ * Modified version published on 2026-10-01.
+ * Modification notice added on 2026-10-01.
+ *
+ * Based on bigr00/mod-llm-playerbots.
+ * Original copyright and license notices remain in effect.
  */
 
 #include "LlmBotBrain.h"
@@ -10,6 +18,7 @@
 #include "LlmToolbox.h"
 #include "PromptBuilder.h"
 
+#include "ExternalEventHelper.h"
 #include "ObjectAccessor.h"
 #include "Player.h"
 #include "Playerbots.h"
@@ -18,6 +27,7 @@
 #include "json.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <limits>
 
 using nlohmann::json;
@@ -60,6 +70,22 @@ std::vector<std::string> const kFallbackLines = {
     "Quiet around here, isn't it?",         // ZoneChanged
     "Onwards."                              // GoalCompleted
 };
+
+// WoW character names are normalized by the server (for example "CM" may
+// become "Cm"), so commander-name matching must be case-insensitive.
+bool EqualsIgnoreCase(std::string const& left, std::string const& right)
+{
+    if (left.size() != right.size())
+    {
+        return false;
+    }
+
+    return std::equal(left.begin(), left.end(), right.begin(),
+        [](unsigned char a, unsigned char b)
+        {
+            return std::tolower(a) == std::tolower(b);
+        });
+}
 
 uint32_t EmoteIdFor(std::string const& emote)
 {
@@ -118,7 +144,8 @@ LlmBotBrain::LlmBotBrain(ObjectGuid guid, std::string name, std::string personaK
 
 void LlmBotBrain::Configure(LlmClient* client, LlmBudget* budget, LlmBotRegistry* registry,
     LlmEventBus* bus, LlmConversationManager* conversations, LlmChatLog* chatLog,
-    uint32_t socialCooldownSec, uint32_t planIntervalSec)
+    uint32_t socialCooldownSec, uint32_t planIntervalSec,
+    std::string const& commanderName)
 {
     m_client = client;
     m_budget = budget;
@@ -128,6 +155,7 @@ void LlmBotBrain::Configure(LlmClient* client, LlmBudget* budget, LlmBotRegistry
     m_chatLog = chatLog;
     m_socialCooldownSec = socialCooldownSec;
     m_planIntervalSec = planIntervalSec;
+    m_commanderName = commanderName;
 
     // Open the social gate straight away, and stagger the first plan call
     // across one full interval so a 20-bot roster does not fire 20 Tier 2
@@ -236,29 +264,27 @@ void LlmBotBrain::Tick(Player* player, uint32_t pTimeMs)
         m_zone = zoneId != 0 ? ai->GetLocalizedAreaName(ai->GetCurrentZone()) : "";
     }
 
+    bool const isCommander = EqualsIgnoreCase(m_name, m_commanderName);
+
     // One event per tick interval - the cadence gate is per bot, the global
     // rate gate is inside LlmBudget::Check.
     //
-    // Only touch the queue when the bot can actually act. Taking events out
-    // while a call is in flight or the cooldown is closed would discard them:
-    // a whisper that arrived a second after some banter used to be pulled off
-    // the bus and dropped on the floor, which is why bots answered only some
-    // of the time. Left queued, it is still waiting when the bot frees up.
+    // CM is intentionally whisper-only. Ambient/world events may still be
+    // emitted by shared hooks, but the commander brain discards them here.
     if (!m_inFlight.load())
     {
-        // The social cooldown exists to keep ambient chatter cheap, not to
-        // make a player wait. While it is closed the bot will still pick up
-        // player-directed events (priority 0) and ignore everything else,
-        // which stays queued rather than being thrown away.
         uint32_t const maxPriority = CooldownOk() ? std::numeric_limits<uint32_t>::max() : 0;
 
         LlmBotEvent event;
         while (m_bus->TakeBestFor(m_guid, event, maxPriority))
         {
-            // Bot-to-bot banter goes through the conversation guard. The pair
-            // is (this bot, the bot that spoke) - actor carries the speaker's
-            // guid. A rejected banter event is genuinely finished, so drop it
-            // and look at whatever is behind it.
+            if (isCommander && event.kind != EventKind::Whisper)
+            {
+                continue;
+            }
+
+            // Bot-to-bot banter goes through the conversation guard for
+            // ordinary conversational LLM bots.
             if (event.kind == EventKind::BotSayNear && m_conversations &&
                 !m_conversations->MayReply(m_guid, event.actor))
             {
@@ -268,12 +294,13 @@ void LlmBotBrain::Tick(Player* player, uint32_t pTimeMs)
             LOG_DEBUG("llmbots.brain", "{}: handling event kind {} from '{}'",
                 m_name, static_cast<int>(event.kind), event.subject);
             SubmitSocial(player, event);
-            break; // one call at a time; the rest stay queued for later ticks
+            break;
         }
     }
 
-    // Tier 2 planning cadence.
-    if (!m_inFlight.load())
+    // Tier 2 autonomous planning is for conversational/adventuring bots only.
+    // CM acts solely in response to an authorized whisper.
+    if (!isCommander && !m_inFlight.load())
     {
         auto const now = std::chrono::steady_clock::now();
         if (m_planIntervalSec > 0 && now - m_lastPlanAt >= std::chrono::seconds(m_planIntervalSec))
@@ -340,6 +367,16 @@ void LlmBotBrain::SubmitSocial(Player* player, LlmBotEvent const& event)
     }
     BuildContextSnapshot(player, ai);
 
+    // Commander.Name identifies the LLM bot that owns command authority.
+    // Ordinary roster bots may converse, but only this brain receives
+    // action/command tools.
+    bool const isCommander = EqualsIgnoreCase(m_name, m_commanderName);
+
+    if (isCommander)
+    {
+        LOG_DEBUG("llmbots.brain", "{}: commander brain recognized (speaker '{}')", m_name, event.subject);
+    }
+
     Persona const* persona = m_registry ? m_registry->FindPersona(m_personaKey) : nullptr;
     Persona const defaultPersona = { m_name, m_name, "An adventurer like any other.", "plain, honest speech.",
         "Occasionally cracks a dry joke.", 0 };
@@ -360,13 +397,36 @@ void LlmBotBrain::SubmitSocial(Player* player, LlmBotEvent const& event)
     request.tier = ModelTier::Fast;
     request.purpose = Purpose::Social;
     request.schemaName = "bot_utterance";
-    // Tool rounds spend output tokens on the calls themselves, so this budget
-    // covers more than the one short line that comes out at the end.
     request.maxOutputTokens = 800;
     request.requesterId = m_guid.GetCounter();
-    request.tools = SocialToolSpecs();
-    request.system = BuildSystemPrompt(persona ? *persona : defaultPersona, context, ModelTier::Fast);
-    request.user = BuildSocialPrompt(event, context);
+
+    if (isCommander)
+    {
+        // CM is a private tool interface, not a role-playing adventurer.
+        request.temperature = 0.1f;
+        request.maxOutputTokens = 400;
+        request.tools = CommanderToolSpecs();
+
+        request.system =
+            "You are CM, a private command interface for the authorized human owner. "
+            "You are not an adventurer, companion, NPC, or role-playing character. "
+            "Do not invent a personality, emotions, memories, desires, jokes, or autonomous goals. "
+            "Keep replies concise and functional. "
+            "For any request that asks you to command a bot or change game state, use an available tool. "
+            "Never claim that an action was performed unless a tool result confirms it. "
+            "If no available tool can perform the requested action, say that the action is not available yet. "
+            "Do not pretend to execute unsupported actions.";
+
+        request.user = event.detail;
+
+        LOG_DEBUG("llmbots.brain", "{}: commander-only tools enabled for '{}'", m_name, event.subject);
+    }
+    else
+    {
+        request.tools = SocialToolSpecs();
+        request.system = BuildSystemPrompt(persona ? *persona : defaultPersona, context, ModelTier::Fast);
+        request.user = BuildSocialPrompt(event, context);
+    }
 
     LOG_DEBUG("llmbots.brain", "{}: submitting social call (event kind {})", m_name, static_cast<int>(event.kind));
     if (event.kind == EventKind::Whisper)
@@ -501,13 +561,25 @@ void LlmBotBrain::ApplyCompletion(LlmRequest const& request, LlmResponse const& 
             return;
         }
 
+        // Only the configured commander brain may receive an issuer for
+        // action tools. The authorized sender GUID was captured when the
+        // whisper entered the event bus, so character names are never used
+        // for command authorization or issuer lookup.
+        Player* issuer = nullptr;
+        if (EqualsIgnoreCase(m_name, m_commanderName) &&
+            event.kind == EventKind::Whisper &&
+            !event.actor.IsEmpty())
+        {
+            issuer = ObjectAccessor::FindPlayer(event.actor);
+        }
+
         std::vector<ToolResult> results;
         results.reserve(response.toolCalls.size());
         for (auto const& call : response.toolCalls)
         {
             ToolResult result;
             result.id = call.id;
-            result.output = ExecuteTool(player, call, m_chatLog);
+            result.output = ExecuteTool(player, call, m_chatLog, issuer);
             LOG_DEBUG("llmbots.brain", "{}: tool {}({}) -> {}", m_name, call.name, call.arguments, result.output);
             results.push_back(std::move(result));
         }

@@ -27,6 +27,15 @@ LlmBots.Provider = openai
 # by RandomPlayerbotMgr.
 LlmBots.BotAccount = llmbots
 
+# Commander character name; any existing character name is allowed.
+# Log this character in as a Playerbot and register it with .llmbot add.
+LlmBots.Commander.Name = CM
+
+# Numeric account.id of the HUMAN OWNER allowed to command this bot.
+# Not a username and not necessarily the account holding the bot.
+# 0 means no authorized owner has been configured.
+LlmBots.Commander.AccountId = 0
+
 # ---------------------------------------------------------------------------
 # OpenAI provider (default; used when LlmBots.Provider = openai)
 # ---------------------------------------------------------------------------

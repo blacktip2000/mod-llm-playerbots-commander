@@ -1,4 +1,12 @@
 /*
+ * Modified distribution: mod-playerbots-llm-commander.
+ * This file differs from bigr00/mod-llm-playerbots c0ba652.
+ * Modified version published on 2026-10-01.
+ * Modification notice added on 2026-10-01.
+ * Publication date does not identify every historical edit date.
+ * Original copyright and license notices remain in effect.
+ */
+/*
  * This file is part of the LLM bots feature of mod-playerbots (AzerothCore).
  */
 
@@ -34,6 +42,9 @@ LlmBotsConfig LoadLlmBotsConfig()
     cfg.maxTokensPerHour = sConfigMgr->GetOption<uint32_t>("LlmBots.MaxTokensPerHour", 600000);
     cfg.maxRosterSize = sConfigMgr->GetOption<uint32_t>("LlmBots.MaxRosterSize", 20);
     cfg.botAccount = sConfigMgr->GetOption<std::string>("LlmBots.BotAccount", "llmbots");
+
+    cfg.commanderName = sConfigMgr->GetOption<std::string>("LlmBots.Commander.Name", "CM");
+    cfg.commanderAccountId = sConfigMgr->GetOption<uint32_t>("LlmBots.Commander.AccountId", 0);
 
     cfg.socialCooldownSec = sConfigMgr->GetOption<uint32_t>("LlmBots.Social.CooldownSec", 20);
     cfg.planIntervalSec = sConfigMgr->GetOption<uint32_t>("LlmBots.Plan.IntervalSec", 300);

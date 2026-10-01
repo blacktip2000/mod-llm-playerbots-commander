@@ -1,4 +1,12 @@
 /*
+ * Modified distribution: mod-playerbots-llm-commander.
+ * This file differs from bigr00/mod-llm-playerbots c0ba652.
+ * Modified version published on 2026-10-01.
+ * Modification notice added on 2026-10-01.
+ * Publication date does not identify every historical edit date.
+ * Original copyright and license notices remain in effect.
+ */
+/*
  * This file is part of the LLM bots feature of mod-playerbots (AzerothCore).
  *
  * The module facade. Owns the Llm core, the registry, the brains, the event
@@ -62,6 +70,8 @@ public:
     void OnPlayerTick(Player* player, uint32_t pTimeMs);
 
     // ---- event hooks (map or world thread) ----
+    void OnPlayerLogin(Player* player);
+    void OnPlayerLogout(Player* player);
     void OnWhisperToRosterBot(Player* sender, Player* bot, std::string const& msg);
     void OnSayOrYellNear(Player* sender, std::string const& msg, bool yell);
     void OnBotJustDied(Player* bot);

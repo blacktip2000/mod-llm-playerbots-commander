@@ -13,6 +13,7 @@
 #include "QueryResult.h"
 
 #include "PlayerbotDungeonRepository.h"
+#include "PlayerbotsDatabase.h"
 
 std::vector<DungeonSuggestion> const PlayerbotDungeonRepository::GetDungeonSuggestions()
 {

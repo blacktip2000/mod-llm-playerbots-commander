@@ -37,6 +37,7 @@
 #include "PlayerbotFactory.h"
 #include "PlayerbotTextMgr.h"
 #include "Playerbots.h"
+#include "PlayerbotsDatabase.h"
 #include "Position.h"
 #include "RaceMgr.h"
 #include "Random.h"

@@ -1,4 +1,12 @@
 /*
+ * Modified distribution: mod-playerbots-llm-commander.
+ * This file differs from bigr00/mod-llm-playerbots c0ba652.
+ * Modified version published on 2026-10-01.
+ * Modification notice added on 2026-10-01.
+ * Publication date does not identify every historical edit date.
+ * Original copyright and license notices remain in effect.
+ */
+/*
  * This file is part of the LLM bots feature of mod-playerbots (AzerothCore).
  *
  * Module configuration, read from sConfigMgr once at startup (config file and
@@ -45,6 +53,10 @@ struct LlmBotsConfig
     uint32_t maxTokensPerHour = 600000;
     uint32_t maxRosterSize = 20;
     std::string botAccount = "llmbots";
+
+    // Commander.
+    std::string commanderName = "CM";
+    uint32_t commanderAccountId = 0;
 
     // Cadence.
     uint32_t socialCooldownSec = 20;

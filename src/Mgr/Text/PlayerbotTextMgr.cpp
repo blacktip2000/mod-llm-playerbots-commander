@@ -11,6 +11,7 @@
 #include "QueryResult.h"
 
 #include "PlayerbotTextMgr.h"
+#include "PlayerbotsDatabase.h"
 
 void PlayerbotTextMgr::replaceAll(std::string& str, const std::string& from, const std::string& to)
 {

@@ -4,6 +4,7 @@
  */
 
 #include "PlayerbotFactory.h"
+#include "PlayerbotsDatabase.h"
 
 #include <array>
 #include <utility>

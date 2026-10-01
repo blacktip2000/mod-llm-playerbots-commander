@@ -1,8 +1,17 @@
 /*
  * This file is part of the LLM bots feature of mod-playerbots (AzerothCore).
+ *
+ * Modified in mod-playerbots-llm-commander:
+ * Commander owner authorization and integration.
+ * Modified version published on 2026-10-01.
+ * Modification notice added on 2026-10-01.
+ *
+ * Based on bigr00/mod-llm-playerbots.
+ * Original copyright and license notices remain in effect.
  */
 
 #include "LlmBotsModule.h"
+#include "PlayerbotsDatabase.h"
 
 #include "LlmBotsConfig.h"
 #include "LlmBudget.h"
@@ -21,6 +30,8 @@
 #include "Script/WorldThr/PlayerbotWorldThreadProcessor.h"
 #include "SharedDefines.h"
 #include "StringFormat.h"
+#include "WorldSession.h"
+#include "WorldSessionMgr.h"
 
 #include <algorithm>
 
@@ -40,13 +51,33 @@ bool RosterActorOnline(ObjectGuid guid)
     return sRandomPlayerbotMgr.GetPlayerBot(guid) != nullptr;
 }
 
+bool CommanderAccountOnline()
+{
+    LlmBotsConfig const config = LoadLlmBotsConfig();
+    if (!config.commanderAccountId)
+    {
+        return false;
+    }
+
+    WorldSession* session = sWorldSessionMgr->FindSession(config.commanderAccountId);
+    return session && session->GetPlayer();
+}
+
 // Escapes a value for interpolation into plain SQL. Roster edits come from a
 // GM command rather than an untrusted client, but a quote in a persona key or
 // character name would still break the statement.
 std::string Escaped(std::string const& value)
 {
     std::string out = value;
-    PlayerbotsDatabase.EscapeString(out);
+    std::string escaped;
+    escaped.reserve(out.size());
+    for (char c : out)
+    {
+        if (c == '\\') escaped += "\\";
+        else if (c == '\'') escaped += "''";
+        else escaped += c;
+    }
+    out = std::move(escaped);
     return out;
 }
 
@@ -193,7 +224,7 @@ void LlmBotsModule::OnRosterQueries(QueryResult rosterResult, QueryResult person
             auto brain = std::make_unique<LlmBotBrain>(entry.guid, entry.name, entry.personaKey);
             LlmBotsConfig const config = LoadLlmBotsConfig();
             brain->Configure(m_client.get(), m_budget.get(), &m_registry, &m_bus, &m_conversations,
-                &m_chatLog, config.socialCooldownSec, config.planIntervalSec);
+                &m_chatLog, config.socialCooldownSec, config.planIntervalSec, config.commanderName);
             ApplyMemoryForGuid(entry.guid, brain.get());
             newBrains.emplace(entry.guid, std::move(brain));
         }
@@ -286,8 +317,62 @@ void LlmBotsModule::OnWorldTick(uint32_t diff)
     }
 }
 
+void LlmBotsModule::OnPlayerLogin(Player* player)
+{
+    if (!m_enabled || !player || !player->GetSession())
+    {
+        return;
+    }
+
+    LlmBotsConfig const config = LoadLlmBotsConfig();
+    if (!config.commanderAccountId ||
+        player->GetSession()->GetAccountId() != config.commanderAccountId)
+    {
+        return;
+    }
+
+    LOG_INFO("llmbots.module", "Commander account {} entered the world - spawning LLM roster",
+        config.commanderAccountId);
+
+    m_spawnDelayMs = 0;
+    EnsureBotsSpawned();
+}
+
+void LlmBotsModule::OnPlayerLogout(Player* player)
+{
+    if (!m_enabled || !player || !player->GetSession())
+    {
+        return;
+    }
+
+    LlmBotsConfig const config = LoadLlmBotsConfig();
+    if (!config.commanderAccountId ||
+        player->GetSession()->GetAccountId() != config.commanderAccountId)
+    {
+        return;
+    }
+
+    LOG_INFO("llmbots.module", "Commander account {} left the world - logging out LLM roster",
+        config.commanderAccountId);
+
+    for (auto const& entry : m_registry.Entries(/*actorsOnly=*/false))
+    {
+        if (RosterActorOnline(entry.guid))
+        {
+            sRandomPlayerbotMgr.LogoutPlayerBot(entry.guid);
+        }
+    }
+}
+
 void LlmBotsModule::EnsureBotsSpawned()
 {
+    // LLM roster exists only while the configured owner account
+    // has a character actually inside the world.
+    if (!CommanderAccountOnline())
+    {
+        return;
+    }
+
     // Initial spawn is delayed so the world has settled after startup.
     if (m_spawnDelayMs > 0)
     {
@@ -345,10 +430,46 @@ void LlmBotsModule::OnPlayerTick(Player* player, uint32_t pTimeMs)
 
 void LlmBotsModule::OnWhisperToRosterBot(Player* sender, Player* bot, std::string const& msg)
 {
-    if (!m_enabled || m_paused || !sender)
+    if (!m_enabled || m_paused || !sender || !bot)
     {
         return;
     }
+
+    LlmBotsConfig const config = LoadLlmBotsConfig();
+
+    auto equalsIgnoreCaseAscii = [](std::string const& left, std::string const& right)
+    {
+        if (left.size() != right.size())
+        {
+            return false;
+        }
+
+        for (size_t i = 0; i < left.size(); ++i)
+        {
+            char const a = (left[i] >= 'A' && left[i] <= 'Z') ? left[i] + ('a' - 'A') : left[i];
+            char const b = (right[i] >= 'A' && right[i] <= 'Z') ? right[i] + ('a' - 'A') : right[i];
+            if (a != b)
+            {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    bool const isCommander = equalsIgnoreCaseAscii(bot->GetName(), config.commanderName);
+    if (isCommander)
+    {
+        WorldSession* senderSession = sender->GetSession();
+        if (!senderSession || !config.commanderAccountId ||
+            senderSession->GetAccountId() != config.commanderAccountId)
+        {
+            LOG_DEBUG("llmbots.brain",
+                "whisper to commander '{}' ignored: unauthorized account",
+                bot->GetName());
+            return;
+        }
+    }
+
     if (m_chronicler && bot->GetGUID() == m_chroniclerGuid)
     {
         m_chronicler->OnWhisper(sender, msg);
@@ -359,6 +480,7 @@ void LlmBotsModule::OnWhisperToRosterBot(Player* sender, Player* bot, std::strin
         LOG_DEBUG("llmbots.brain", "whisper to '{}' ignored: no brain for guid {}", bot->GetName(), bot->GetGUID().GetCounter());
         return;
     }
+
     ChatLine line;
     line.speaker = sender->GetName();
     line.text = msg;
@@ -369,6 +491,7 @@ void LlmBotsModule::OnWhisperToRosterBot(Player* sender, Player* bot, std::strin
     LlmBotEvent event;
     event.kind = EventKind::Whisper;
     event.guid = bot->GetGUID();
+    event.actor = sender->GetGUID();
     event.subject = sender->GetName();
     event.detail = msg;
     m_bus.Push(event);

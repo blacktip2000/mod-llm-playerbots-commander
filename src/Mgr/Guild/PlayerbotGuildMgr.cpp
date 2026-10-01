@@ -5,6 +5,7 @@
  */
 
 #include "PlayerbotGuildMgr.h"
+#include "PlayerbotsDatabase.h"
 #include "Player.h"
 #include "PlayerbotAIConfig.h"
 #include "DatabaseEnv.h"

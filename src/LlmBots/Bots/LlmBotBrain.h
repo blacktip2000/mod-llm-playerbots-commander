@@ -1,4 +1,12 @@
 /*
+ * Modified distribution: mod-playerbots-llm-commander.
+ * This file differs from bigr00/mod-llm-playerbots c0ba652.
+ * Modified version published on 2026-10-01.
+ * Modification notice added on 2026-10-01.
+ * Publication date does not identify every historical edit date.
+ * Original copyright and license notices remain in effect.
+ */
+/*
  * This file is part of the LLM bots feature of mod-playerbots (AzerothCore).
  *
  * Per-roster-bot LLM brain. Runs on the MAP thread from OnPlayerAfterUpdate,
@@ -56,7 +64,8 @@ public:
 
     void Configure(LlmClient* client, LlmBudget* budget, LlmBotRegistry* registry,
         LlmEventBus* bus, LlmConversationManager* conversations, LlmChatLog* chatLog,
-        uint32_t socialCooldownSec, uint32_t planIntervalSec);
+        uint32_t socialCooldownSec, uint32_t planIntervalSec,
+        std::string const& commanderName);
 
     // Called from the map thread for this bot. Never blocks.
     void Tick(Player* player, uint32_t pTimeMs);
@@ -104,6 +113,9 @@ private:
     LlmEventBus* m_bus = nullptr;
     LlmConversationManager* m_conversations = nullptr;
     LlmChatLog* m_chatLog = nullptr;
+
+    // Human commander whose messages may authorize commander-only tools.
+    std::string m_commanderName = "CM";
 
     uint32_t m_socialCooldownSec = 20;
     uint32_t m_planIntervalSec = 300;

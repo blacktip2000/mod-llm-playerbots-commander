@@ -247,7 +247,7 @@ void PlayerbotAI::UpdateAI(uint32 elapsed, bool minimal)
 
     // Early return if bot is in invalid state
     if (!bot || !bot->GetSession() || !bot->IsInWorld() || bot->IsBeingTeleported() ||
-        bot->GetSession()->isLogingOut() || bot->IsDuringRemoveFromWorld())
+        bot->GetSession()->IsLoggingOut() || bot->IsDuringRemoveFromWorld())
         return;
 
     // Handle cheat options (set bot health and power if cheats are enabled)
@@ -501,7 +501,7 @@ void PlayerbotAI::UpdateAIInternal([[maybe_unused]] uint32 elapsed, bool minimal
     HandleCommands();
 
     // logout if logout timer is ready or if instant logout is possible
-    if (bot->GetSession()->isLogingOut())
+    if (bot->GetSession()->IsLoggingOut())
     {
         WorldSession* botWorldSessionPtr = bot->GetSession();
         bool logout = botWorldSessionPtr->ShouldLogOut(time(nullptr));
@@ -659,8 +659,7 @@ void PlayerbotAI::HandleCommand(uint32 type, const std::string& text, Player& fr
     {
         std::string response = HandleRemoteCommand(filtered.substr(6));
         WorldPacket data;
-        ChatHandler::BuildChatPacket(data, CHAT_MSG_ADDON, response.c_str(), LANG_ADDON, CHAT_TAG_NONE, bot->GetGUID(),
-                                     bot->GetName());
+        ChatHandler::BuildChatPacket(data, CHAT_MSG_ADDON, LANG_ADDON, bot->GetGUID(), ObjectGuid::Empty, response, CHAT_TAG_NONE, bot->GetName());
         ServerFacade::instance().SendPacket(&fromPlayer, &data);
         return;
     }
@@ -721,7 +720,7 @@ void PlayerbotAI::HandleCommand(uint32 type, const std::string& text, Player& fr
     // TODO: missing implementation to port
     /*else if (filtered == "logout")
     {
-        if (!(bot->IsStunnedByLogout() || bot->GetSession()->isLogingOut()))
+        if (!(bot->IsStunnedByLogout() || bot->GetSession()->IsLoggingOut()))
         {
             if (type == CHAT_MSG_WHISPER)
                 TellPlayer(&fromPlayer, BOT_TEXT("logout_start"));
@@ -732,7 +731,7 @@ void PlayerbotAI::HandleCommand(uint32 type, const std::string& text, Player& fr
     }
     else if (filtered == "logout cancel")
     {
-        if (bot->IsStunnedByLogout() || bot->GetSession()->isLogingOut())
+        if (bot->IsStunnedByLogout() || bot->GetSession()->IsLoggingOut())
         {
             if (type == CHAT_MSG_WHISPER)
                 TellPlayer(&fromPlayer, BOT_TEXT("logout_cancel"));
@@ -854,7 +853,7 @@ void PlayerbotAI::Reset(bool full)
     bool logout = botWorldSessionPtr->ShouldLogOut(time(nullptr));
 
     // cancel logout
-    if (!logout && bot->GetSession()->isLogingOut())
+    if (!logout && bot->GetSession()->IsLoggingOut())
     {
         WorldPackets::Character::LogoutCancel data = WorldPacket(CMSG_LOGOUT_CANCEL);
         bot->GetSession()->HandleLogoutCancelOpcode(data);
@@ -1051,7 +1050,7 @@ void PlayerbotAI::HandleCommand(uint32 type, std::string const text, Player* fro
     }
     else if (filtered == "logout")
     {
-        if (bot->GetSession()->isLogingOut())
+        if (bot->GetSession()->IsLoggingOut())
             return;
 
         // Verify the command came from this bot's master. Also handles nullptr
@@ -1091,7 +1090,7 @@ void PlayerbotAI::HandleCommand(uint32 type, std::string const text, Player* fro
     }
     else if (filtered == "logout cancel")
     {
-        if (!bot->GetSession()->isLogingOut())
+        if (!bot->GetSession()->IsLoggingOut())
             return;
 
         if (type == CHAT_MSG_WHISPER)
@@ -2890,8 +2889,7 @@ bool PlayerbotAI::SayToParty(const std::string& msg)
         return false;
 
     WorldPacket data;
-    ChatHandler::BuildChatPacket(data, CHAT_MSG_PARTY, msg.c_str(), LANG_UNIVERSAL, CHAT_TAG_NONE, bot->GetGUID(),
-                                 bot->GetName());
+    ChatHandler::BuildChatPacket(data, CHAT_MSG_PARTY, LANG_UNIVERSAL, bot->GetGUID(), ObjectGuid::Empty, msg, CHAT_TAG_NONE, bot->GetName());
 
     for (auto receiver : GetRealPlayersInGroup())
     {
@@ -2907,8 +2905,7 @@ bool PlayerbotAI::SayToRaid(const std::string& msg)
         return false;
 
     WorldPacket data;
-    ChatHandler::BuildChatPacket(data, CHAT_MSG_RAID, msg.c_str(), LANG_UNIVERSAL, CHAT_TAG_NONE, bot->GetGUID(),
-                                 bot->GetName());
+    ChatHandler::BuildChatPacket(data, CHAT_MSG_RAID, LANG_UNIVERSAL, bot->GetGUID(), ObjectGuid::Empty, msg, CHAT_TAG_NONE, bot->GetName());
 
     for (auto receiver : GetRealPlayersInGroup())
     {
@@ -4598,7 +4595,7 @@ bool PlayerbotAI::AllowActive(ActivityType activityType)
 {
     // bot is in an invalid state, not safe to process
     if (!bot || !bot->GetSession() || !bot->IsInWorld() || bot->IsBeingTeleported() ||
-        bot->GetSession()->isLogingOut() || bot->IsDuringRemoveFromWorld())
+        bot->GetSession()->IsLoggingOut() || bot->IsDuringRemoveFromWorld())
         return false;
 
     // always allow packet handling (e.g. group invites, trade, loot, friend requests etc)
@@ -4616,11 +4613,11 @@ bool PlayerbotAI::AllowActive(ActivityType activityType)
             return true;
     }
 
-    // bot is inside a BG, dungeon, or raid — always active
+    // bot is inside a BG, dungeon, or raid ??always active
     if (!WorldPosition(bot).isOverworld())
         return true;
 
-    // bot is waiting in a BG queue — stay active to speed up join
+    // bot is waiting in a BG queue ??stay active to speed up join
     if (bot->InBattlegroundQueue())
         return true;
 
@@ -4699,7 +4696,7 @@ bool PlayerbotAI::AllowActive(ActivityType activityType)
 
             PlayerbotAI* memberBotAI = GET_PLAYERBOT_AI(member);
 
-            // group member is a real player or owned by one — stay active
+            // group member is a real player or owned by one ??stay active
             if (!memberBotAI || memberBotAI->HasRealPlayerMaster())
                 return true;
 
@@ -4712,7 +4709,7 @@ bool PlayerbotAI::AllowActive(ActivityType activityType)
         }
     }
 
-    // bot is in LFG queue — stay active
+    // bot is in LFG queue ??stay active
     bool isLFG = false;
     if (group)
     {
@@ -4735,7 +4732,7 @@ bool PlayerbotAI::AllowActive(ActivityType activityType)
         for (auto& player : sRandomPlayerbotMgr.GetPlayers())
         {
             if (!player || !player->GetSession() || !player->IsInWorld() || player->IsDuringRemoveFromWorld() ||
-                player->GetSession()->isLogingOut())
+                player->GetSession()->IsLoggingOut())
                 continue;
 
             PlayerbotAI* playerAI = GET_PLAYERBOT_AI(player);
@@ -4748,8 +4745,7 @@ bool PlayerbotAI::AllowActive(ActivityType activityType)
         }
     }
 
-    // pathfinding only runs for bots forced active by the rules above —
-    // skip it for bots that would only be active via random rotation
+    // pathfinding only runs for bots forced active by the rules above ??    // skip it for bots that would only be active via random rotation
     if (activityType == DETAILED_MOVE_ACTIVITY)
         return false;
 
@@ -4770,7 +4766,7 @@ bool PlayerbotAI::AllowActive(ActivityType activityType)
         mod = AutoScaleActivity(mod);
     }
 
-    // deterministic rotation — bot is active if its hash falls below the threshold
+    // deterministic rotation ??bot is active if its hash falls below the threshold
     uint32 ActivityNumber = GetFixedBotNumber(100);
     return ActivityNumber < mod;
 }
@@ -4782,7 +4778,7 @@ bool PlayerbotAI::AllowActivity(ActivityType activityType, bool checkNow)
     if (!allowActiveCheckTimer[activityIndex])
         allowActiveCheckTimer[activityIndex] = getMSTime();
 
-    // 4500ms base + 0–499ms per-bot offset = 4500–4999ms, capping at just under 5 seconds
+    // 4500ms base + 0??99ms per-bot offset = 4500??999ms, capping at just under 5 seconds
     uint32 offset = bot->GetGUID().GetCounter() % 500;
 
     if (!checkNow && getMSTime() < (allowActiveCheckTimer[activityIndex] + 4500 + offset))
@@ -4843,18 +4839,18 @@ void PlayerbotAI::RemoveShapeshift()
     // RemoveAura("tree of life");
 }
 
-// Mirrors Blizzard’s GetAverageItemLevel rules :
+// Mirrors Blizzard?�s GetAverageItemLevel rules :
 // https://wowpedia.fandom.com/wiki/API_GetAverageItemLevel
 uint32 PlayerbotAI::GetEquipGearScore(Player* player)
 {
     constexpr uint8 TOTAL_SLOTS = 17;  // every slot except Body & Tabard
     uint32 sumLevel = 0;
 
-    /* ---------- 0.  Detect “ignore off-hand” situations --------- */
+    /* ---------- 0.  Detect ?�ignore off-hand??situations --------- */
     Item* main = player->GetItemByPos(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_MAINHAND);
     Item* off = player->GetItemByPos(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_OFFHAND);
 
-    bool ignoreOffhand = false;  // true → divisor = 16
+    bool ignoreOffhand = false;  // true ??divisor = 16
     if (main)
     {
         bool twoHand = (main->GetTemplate()->InventoryType == INVTYPE_2HWEAPON);

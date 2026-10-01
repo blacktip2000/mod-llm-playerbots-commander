@@ -31,6 +31,7 @@
 #include "PlayerbotTextMgr.h"
 #include "PlayerbotWorldThreadProcessor.h"
 #include "Playerbots.h"
+#include "PlayerbotsDatabase.h"
 #include "PlayerbotGuildMgr.h"
 #include "RandomPlayerbotMgr.h"
 #include "SharedDefines.h"
@@ -318,7 +319,7 @@ void PlayerbotMgr::CancelLogout()
         if (!botAI || botAI->IsRealPlayer())
             continue;
 
-        if (bot->GetSession()->isLogingOut())
+        if (bot->GetSession()->IsLoggingOut())
         {
             WorldPackets::Character::LogoutCancel data = WorldPacket(CMSG_LOGOUT_CANCEL);
             bot->GetSession()->HandleLogoutCancelOpcode(data);
@@ -338,7 +339,7 @@ void PlayerbotMgr::CancelLogout()
         if (botAI->GetMaster() != master)
             continue;
 
-        if (bot->GetSession()->isLogingOut())
+        if (bot->GetSession()->IsLoggingOut())
         {
             WorldPackets::Character::LogoutCancel data = WorldPacket(CMSG_LOGOUT_CANCEL);
             bot->GetSession()->HandleLogoutCancelOpcode(data);
@@ -369,7 +370,7 @@ void PlayerbotHolder::LogoutPlayerBot(ObjectGuid guid)
         WorldSession* botWorldSessionPtr = bot->GetSession();
         [[maybe_unused]] WorldSession* masterWorldSessionPtr = nullptr;     // Remove [[maybe_unused]] tag if timed logout implemented.
 
-        if (botWorldSessionPtr->isLogingOut())
+        if (botWorldSessionPtr->IsLoggingOut())
             return;
 
         Player* master = botAI->GetMaster();
@@ -820,7 +821,7 @@ std::string const PlayerbotHolder::ProcessBotCommand(std::string const cmd, Obje
 
         if (cmd == "refresh=raid")
         {  // TODO: This function is not perfect yet. If you are already in a raid,
-            // after the command is executed, the AI ​​needs to go back online or exit the raid and re-enter.
+            // after the command is executed, the AI ?�​needs to go back online or exit the raid and re-enter.
             PlayerbotFactory factory(bot, bot->GetLevel());
             factory.UnbindInstance();
             return "ok";
@@ -1794,7 +1795,7 @@ PlayerbotAI* PlayerbotsMgr::GetPlayerbotAI(Player* player)
     {
         return nullptr;
     }
-    // if (player->GetSession()->isLogingOut() || player->IsDuringRemoveFromWorld())
+    // if (player->GetSession()->IsLoggingOut() || player->IsDuringRemoveFromWorld())
     // {
     //     return nullptr;
     // }

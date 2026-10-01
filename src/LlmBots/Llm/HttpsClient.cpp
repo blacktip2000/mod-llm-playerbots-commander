@@ -1,4 +1,12 @@
 /*
+ * Modified distribution: mod-playerbots-llm-commander.
+ * This file differs from bigr00/mod-llm-playerbots c0ba652.
+ * Modified version published on 2026-10-01.
+ * Modification notice added on 2026-10-01.
+ * Publication date does not identify every historical edit date.
+ * Original copyright and license notices remain in effect.
+ */
+/*
  * This file is part of the LLM bots feature of mod-playerbots (AzerothCore).
  */
 
@@ -71,10 +79,14 @@ HttpResponse HttpsPostJson(std::string const& host, std::string const& port,
         net::io_context ioc;
         ssl::context ctx(ssl::context::tlsv12_client);
         ctx.set_default_verify_paths();
+        ctx.load_verify_file("ca-bundle.crt");
         ctx.set_verify_mode(ssl::verify_peer);
 
         tcp::resolver resolver(ioc);
         beast::ssl_stream<beast::tcp_stream> stream(ioc, ctx);
+
+        // Hostname verification must be configured before the TLS handshake.
+        stream.set_verify_callback(ssl::host_name_verification(host));
 
         if (!SSL_set_tlsext_host_name(stream.native_handle(), host.c_str()))
         {
@@ -86,7 +98,6 @@ HttpResponse HttpsPostJson(std::string const& host, std::string const& port,
         beast::get_lowest_layer(stream).expires_after(std::chrono::milliseconds(timeoutMs));
         beast::get_lowest_layer(stream).connect(results);
         stream.handshake(ssl::stream_base::client);
-        stream.set_verify_callback(ssl::host_name_verification(host));
 
         http::request<http::string_body> req(http::verb::post, path, 11);
         req.set(http::field::host, host);

@@ -5,6 +5,7 @@
  */
 
 #include "CustomStrategy.h"
+#include "PlayerbotsDatabase.h"
 
 #include <regex>
 #include <stdexcept>

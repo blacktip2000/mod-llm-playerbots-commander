@@ -4,12 +4,15 @@
  */
 
 #include "Playerbots.h"
+#include "PlayerbotsDatabase.h"
 
 #include "BattlefieldScript.h"
 #include "Channel.h"
 #include "Config.h"
 #include "DatabaseEnv.h"
-#include "DatabaseLoader.h"
+#include "DBUpdater.h"
+#include "BuiltInConfig.h"
+#include <mysqld_error.h>
 #include "GuildTaskMgr.h"
 #include "PlayerScript.h"
 #include "PlayerbotAIConfig.h"
@@ -27,20 +30,52 @@ class PlayerbotsDatabaseScript : public DatabaseScript
 public:
     PlayerbotsDatabaseScript() : DatabaseScript("PlayerbotsDatabaseScript") {}
 
-    bool OnDatabasesLoading() override
+    bool OnModuleDatabasesLoading() override
     {
-        DatabaseLoader playerbotLoader("server.playerbots");
-        playerbotLoader.SetUpdateFlags(sConfigMgr->GetOption<bool>("Playerbots.Updates.EnableDatabases", true)
-                                           ? DatabaseLoader::DATABASE_PLAYERBOTS
-                                           : 0);
-        playerbotLoader.AddDatabase(PlayerbotsDatabase, "Playerbots");
+        std::string const dbString = sConfigMgr->GetOption<std::string>("PlayerbotsDatabaseInfo", "");
+        uint8 const synchThreads = sConfigMgr->GetOption<uint8>("PlayerbotsDatabase.SynchThreads", 1);
 
-        return playerbotLoader.Load();
+        PlayerbotsDatabase.SetConnectionInfo(dbString, synchThreads);
+        if (uint32 error = PlayerbotsDatabase.Open())
+        {
+            if (error == ER_BAD_DB_ERROR && sConfigMgr->GetOption<bool>("Playerbots.Updates.EnableDatabases", true))
+            {
+                if (ModuleDBUpdater::Create(PlayerbotsDatabase) && !PlayerbotsDatabase.Open())
+                    error = 0;
+            }
+
+            if (error)
+            {
+                LOG_ERROR("server.playerbots", "Playerbots database could not be opened.");
+                return false;
+            }
+        }
+
+        DBUpdaterInfo const info{
+            "Playerbots",
+            BuiltInConfig::GetSourceDirectory(),
+            BuiltInConfig::GetSourceDirectory() + "/modules/mod-playerbots/data/sql/playerbots/base/",
+            "playerbots"
+        };
+
+        if (sConfigMgr->GetOption<bool>("Playerbots.Updates.EnableDatabases", true))
+        {
+            if (!ModuleDBUpdater::Populate(PlayerbotsDatabase, info))
+                return false;
+
+            if (!ModuleDBUpdater::Update(PlayerbotsDatabase, info, "mod-playerbots"))
+                return false;
+        }
+
+        if (!PlayerbotsDatabase.PrepareStatements())
+            return false;
+
+        return true;
     }
 
-    void OnDatabasesKeepAlive() override { PlayerbotsDatabase.KeepAlive(); }
+    void OnModuleDatabasesKeepAlive() override { PlayerbotsDatabase.KeepAlive(); }
 
-    void OnDatabasesClosing() override { PlayerbotsDatabase.Close(); }
+    void OnModuleDatabasesClosing() override { PlayerbotsDatabase.Close(); }
 
     void OnDatabaseWarnAboutSyncQueries(bool apply) override { PlayerbotsDatabase.WarnAboutSyncQueries(apply); }
 
@@ -50,9 +85,10 @@ public:
         statementParam = player->GetGUID().GetCounter();
     }
 
-    void OnDatabaseGetDBRevision(std::string& revision) override
+    void OnDatabaseGetDBRevision(std::map<std::string, std::string>& revisions) override
     {
-        if (QueryResult resultPlayerbot =
+                std::string revision;
+if (QueryResult resultPlayerbot =
                 PlayerbotsDatabase.Query("SELECT date FROM version_db_playerbots ORDER BY date DESC LIMIT 1"))
         {
             Field* fields = resultPlayerbot->Fetch();

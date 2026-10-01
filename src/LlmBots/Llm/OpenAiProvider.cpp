@@ -1,4 +1,12 @@
 /*
+ * Modified distribution: mod-playerbots-llm-commander.
+ * This file differs from bigr00/mod-llm-playerbots c0ba652.
+ * Modified version published on 2026-10-01.
+ * Modification notice added on 2026-10-01.
+ * Publication date does not identify every historical edit date.
+ * Original copyright and license notices remain in effect.
+ */
+/*
  * This file is part of the LLM bots feature of mod-playerbots (AzerothCore).
  */
 
@@ -6,6 +14,7 @@
 
 #include "HttpsClient.h"
 #include "LlmSchema.h"
+#include "Log.h"
 
 #include "json.hpp"
 
@@ -162,8 +171,13 @@ LlmResponse OpenAiProvider::Complete(LlmRequest const& request)
             {
                 parameters = json::parse(tool.parameters);
             }
-            catch (json::exception const&)
+            catch (json::exception const& ex)
             {
+                LOG_ERROR(
+                    "llmbots.provider",
+                    "Dropping malformed tool '{}' because parameters JSON failed to parse: {}",
+                    tool.name,
+                    ex.what());
                 continue; // a malformed tool declaration is dropped, not fatal
             }
             tools.push_back(json::object({

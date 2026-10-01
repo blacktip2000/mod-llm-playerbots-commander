@@ -1,4 +1,12 @@
 /*
+ * Modified distribution: mod-playerbots-llm-commander.
+ * This file differs from bigr00/mod-llm-playerbots c0ba652.
+ * Modified version published on 2026-10-01.
+ * Modification notice added on 2026-10-01.
+ * Publication date does not identify every historical edit date.
+ * Original copyright and license notices remain in effect.
+ */
+/*
  * This file is part of the LLM bots feature of mod-playerbots (AzerothCore).
  *
  * AzerothCore hooks. Own PlayerScript (game events), WorldScript (world
@@ -31,20 +39,26 @@ class LlmBotsPlayerScript : public PlayerScript
 public:
     LlmBotsPlayerScript() : PlayerScript("LlmBotsPlayerScript") { }
 
+    void OnPlayerLogin(Player* player) override
+    {
+        sLlmBotsModule->OnPlayerLogin(player);
+    }
+
+    void OnPlayerLogout(Player* player) override
+    {
+        sLlmBotsModule->OnPlayerLogout(player);
+    }
+
     // Map thread: one tick per roster bot per map update.
     void OnPlayerAfterUpdate(Player* player, uint32_t p_time) override
     {
         sLlmBotsModule->OnPlayerTick(player, p_time);
     }
 
-    // World thread: chat gates. Fires for the SENDER.
-    bool OnPlayerCanUseChat(Player* player, uint32_t type, uint32_t /*language*/, std::string& msg) override
+    // World thread: ordinary say/yell chat is intentionally ignored by LLM bots.
+    // Whispers are handled by the receiver-aware overload below.
+    bool OnPlayerCanUseChat(Player* /*player*/, uint32_t /*type*/, uint32_t /*language*/, std::string& /*msg*/) override
     {
-        if (type != CHAT_MSG_SAY && type != CHAT_MSG_YELL)
-        {
-            return true;
-        }
-        sLlmBotsModule->OnSayOrYellNear(player, msg, type == CHAT_MSG_YELL);
         return true;
     }
 
