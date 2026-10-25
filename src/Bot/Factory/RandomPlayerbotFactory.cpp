@@ -118,22 +118,22 @@ Player* RandomPlayerbotFactory::CreateRandomBot(WorldSession* session, uint8 cls
     std::vector<std::pair<uint8, uint8>> faces, hairs;
     for (CharSectionsEntry const* charSection : sCharSectionsStore)
     {
-        if (charSection->Race != race || charSection->Gender != gender)
+        if (charSection->RaceID != race || charSection->SexID != gender)
             continue;
 
-        switch (charSection->GenType)
+        switch (charSection->BaseSection)
         {
             case SECTION_TYPE_SKIN:
-                skinColors.push_back(charSection->Color);
+                skinColors.push_back(charSection->ColorIndex);
                 break;
             case SECTION_TYPE_FACE:
-                faces.push_back(std::pair<uint8, uint8>(charSection->Type, charSection->Color));
+                faces.push_back(std::pair<uint8, uint8>(charSection->VariationIndex, charSection->ColorIndex));
                 break;
             case SECTION_TYPE_FACIAL_HAIR:
-                facialHairTypes.push_back(charSection->Type);
+                facialHairTypes.push_back(charSection->VariationIndex);
                 break;
             case SECTION_TYPE_HAIR:
-                hairs.push_back(std::pair<uint8, uint8>(charSection->Type, charSection->Color));
+                hairs.push_back(std::pair<uint8, uint8>(charSection->VariationIndex, charSection->ColorIndex));
                 break;
         }
     }
@@ -701,7 +701,7 @@ void RandomPlayerbotFactory::CreateRandomBots()
         RandomPlayerbotFactory factory;
 
         WorldSession* session = new WorldSession(accountId, "", 0x0, nullptr, SEC_PLAYER, EXPANSION_WRATH_OF_THE_LICH_KING,
-                                                time_t(0), LOCALE_enUS, 0, false, false, 0, true);
+                                                time_t(0), LOCALE_enUS, 0, false, false, 0);
         sessionBots.push_back(session);
 
         for (uint8 cls = CLASS_WARRIOR; cls < MAX_CLASSES - count; ++cls)
