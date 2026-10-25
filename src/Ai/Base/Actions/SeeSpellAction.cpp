@@ -101,9 +101,9 @@ bool SeeSpellAction::Execute(Event event)
     if (nextAction.empty())
     {
         if (!inRange && selected)
-            master->SendPlaySpellVisual(bot->GetGUID(), 6372);
+            bot->SendPlaySpellVisual(6372);
         else if (inRange && !selected)
-            master->SendPlaySpellVisual(bot->GetGUID(), 5036);
+            bot->SendPlaySpellVisual(5036);
 
         SET_AI_VALUE(bool, "RTSC selected", inRange);
 
@@ -151,7 +151,7 @@ bool SeeSpellAction::SelectSpell(WorldPosition& spellPosition)
     if (spellPosition.distance(bot) <= 5 || AI_VALUE(bool, "RTSC selected"))
     {
         SET_AI_VALUE(bool, "RTSC selected", true);
-        master->SendPlaySpellVisual(bot->GetGUID(), 5036);
+        bot->SendPlaySpellVisual(5036);
     }
 
     return true;
