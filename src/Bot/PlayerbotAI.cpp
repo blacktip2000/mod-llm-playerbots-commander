@@ -2424,7 +2424,7 @@ bool PlayerbotAI::IsBotMainTank(Player* player)
         return false;
 
     WorldSession* session = player->GetSession();
-    if (!session || !session->IsBot())
+    if (!session || !session->IsHeadless())
         return false;
 
     if (!IsTank(player))
@@ -2454,7 +2454,7 @@ bool PlayerbotAI::IsBotMainTank(Player* player)
         if (memberAssistTankIndex == botAssistTankIndex && player == member)
             return true;
 
-        if (memberAssistTankIndex < botAssistTankIndex && member->GetSession()->IsBot())
+        if (memberAssistTankIndex < botAssistTankIndex && member->GetSession()->IsHeadless())
             return false;
     }
 
