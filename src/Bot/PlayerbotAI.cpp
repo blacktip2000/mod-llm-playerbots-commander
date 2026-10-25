@@ -60,6 +60,7 @@
 
 constexpr uint32 SPELL_TITAN_GRIP = 49152;
 constexpr uint32 SPELL_DK_FROST_PRESENCE = 48263;
+constexpr uint32 VEHICLE_FLAG_FIXED_POSITION = 0x00200000;
 
 std::vector<std::string> PlayerbotAI::dispel_whitelist = {
     "mutating injection",
@@ -4839,14 +4840,14 @@ void PlayerbotAI::RemoveShapeshift()
     // RemoveAura("tree of life");
 }
 
-// Mirrors Blizzard?™s GetAverageItemLevel rules :
+// Mirrors Blizzard?ï¿½s GetAverageItemLevel rules :
 // https://wowpedia.fandom.com/wiki/API_GetAverageItemLevel
 uint32 PlayerbotAI::GetEquipGearScore(Player* player)
 {
     constexpr uint8 TOTAL_SLOTS = 17;  // every slot except Body & Tabard
     uint32 sumLevel = 0;
 
-    /* ---------- 0.  Detect ?œignore off-hand??situations --------- */
+    /* ---------- 0.  Detect ?ï¿½ignore off-hand??situations --------- */
     Item* main = player->GetItemByPos(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_MAINHAND);
     Item* off = player->GetItemByPos(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_OFFHAND);
 
