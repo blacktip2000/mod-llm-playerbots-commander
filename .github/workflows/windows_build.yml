@@ -5,6 +5,7 @@ on:
     branches: [ "master", "test-staging" ]
   pull_request:
     branches: [ "master", "test-staging" ]
+  workflow_dispatch: {}
 
 concurrency:
   group: "windows-build-${{ github.event.pull_request.number || github.ref }}"
@@ -33,11 +34,29 @@ jobs:
           ref: ${{ (github.base_ref || github.ref_name) == 'test-staging' && 'test-staging' || 'Playerbot' }}
           path: a
 
-      - name: Checkout Playerbot Module
+      # The LLM commander lives in THIS fork, which is a full mod-playerbots
+      # module (entire AI tree + the LlmBots/ continuity+tools patch). Build it
+      # as the playerbots module instead of upstream so the CM changes compile in.
+      - name: Checkout LLM commander fork (as mod-playerbots)
         uses: actions/checkout@v4
         with:
-          repository: 'mod-playerbots/mod-playerbots'
+          repository: ${{ github.repository }}
+          ref: ${{ github.head_ref || github.ref_name }}
           path: a/modules/mod-playerbots
+
+      # The running server also has these modules compiled in. Include them so
+      # the rebuilt worldserver keeps the same statically-linked features.
+      - name: Checkout mod-ahbot
+        uses: actions/checkout@v4
+        with:
+          repository: 'azerothcore/mod-ahbot'
+          path: a/modules/mod-ahbot
+
+      - name: Checkout mod-individual-progression
+        uses: actions/checkout@v4
+        with:
+          repository: 'ZhengPeiRu21/mod-individual-progression'
+          path: a/modules/mod-individual-progression
 
       - name: Move source tree to short path
         shell: powershell
@@ -156,3 +175,40 @@ jobs:
           rm -rf var/build/obj
 
           ./acore.sh compiler build
+
+      # Gather the built worldserver.exe (+ sibling DLLs, authserver.exe, and
+      # the OpenSSL runtime DLLs the build links against) into one artifact so
+      # the binary can be hot-swapped into the server.
+      - name: Collect artifacts
+        if: always()
+        shell: powershell
+        run: |
+          $out = "C:\artifact"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+
+          $ws = Get-ChildItem -Path C:\ac -Recurse -Filter worldserver.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($ws) {
+            Write-Host "Found: $($ws.FullName)"
+            Copy-Item $ws.FullName $out -Force
+            Get-ChildItem -Path $ws.Directory -Filter *.dll -ErrorAction SilentlyContinue | ForEach-Object { Copy-Item $_.FullName $out -Force }
+          } else {
+            Write-Host "worldserver.exe NOT found under C:\ac"
+          }
+
+          $as = Get-ChildItem -Path C:\ac -Recurse -Filter authserver.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($as) { Copy-Item $as.FullName $out -Force }
+
+          if (Test-Path C:\openssl\bin) {
+            Get-ChildItem C:\openssl\bin -Filter *.dll -ErrorAction SilentlyContinue | ForEach-Object { Copy-Item $_.FullName $out -Force }
+          }
+
+          Write-Host "--- artifact contents ---"
+          Get-ChildItem $out | Select-Object Name,Length
+
+      - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: worldserver-win64-cm
+          path: C:\artifact
+          if-no-files-found: warn

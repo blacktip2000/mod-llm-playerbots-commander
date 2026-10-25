@@ -45,7 +45,9 @@ uint32_t const kPlanRetryBackoffSec = 30;
 
 // How many tool round-trips one utterance may take before the bot has to
 // answer with what it has. Each round is another API call.
-uint32_t const kMaxToolRounds = 4;
+// Raised from 4 so the commander can chain more tool steps (orchestrate a
+// whole party, look something up then act on it, etc.) within one instruction.
+uint32_t const kMaxToolRounds = 10;
 
 // True for events a player is directly waiting on. Only these are worth a
 // canned line when the budget refuses the call; canned banter is just noise.
@@ -393,6 +395,24 @@ void LlmBotBrain::SubmitSocial(Player* player, LlmBotEvent const& event)
         context.memories = m_memories;
     }
 
+    // Recent transcript for continuity. The event bus only carries events a
+    // bot has not acted on yet, so a short reply like "yes" has no earlier
+    // turns to resolve against unless we supply them. Pull the rolling history
+    // from the chat log. Recent() is newest-first and already includes the
+    // line we are answering now (the whisper hook pushed it before queuing the
+    // event), so drop that newest entry and render the rest oldest-first.
+    std::string transcript;
+    if (m_chatLog)
+    {
+        std::vector<ChatLine> const recent = m_chatLog->Recent(m_guid, 12);
+        for (size_t i = recent.size(); i-- > 1; )
+        {
+            ChatLine const& ln = recent[i];
+            std::string const who = ln.fromBot ? m_name : ln.speaker;
+            transcript += who + ": " + ln.text + "\n";
+        }
+    }
+
     LlmRequest request;
     request.tier = ModelTier::Fast;
     request.purpose = Purpose::Social;
@@ -418,6 +438,15 @@ void LlmBotBrain::SubmitSocial(Player* player, LlmBotEvent const& event)
             "Do not pretend to execute unsupported actions.";
 
         request.user = event.detail;
+        if (!transcript.empty())
+        {
+            request.user =
+                "Recent conversation (oldest first):\n" + transcript +
+                "\nThe owner just said: " + event.detail +
+                "\nReply to what the owner just said. Use the conversation above to "
+                "resolve short references such as \"yes\", \"no\", \"him\", \"that one\". "
+                "Do not ask again about something already stated above.";
+        }
 
         LOG_DEBUG("llmbots.brain", "{}: commander-only tools enabled for '{}'", m_name, event.subject);
     }
@@ -426,6 +455,19 @@ void LlmBotBrain::SubmitSocial(Player* player, LlmBotEvent const& event)
         request.tools = SocialToolSpecs();
         request.system = BuildSystemPrompt(persona ? *persona : defaultPersona, context, ModelTier::Fast);
         request.user = BuildSocialPrompt(event, context);
+        if (!transcript.empty())
+        {
+            request.user += "\n\nRecent conversation (oldest first):\n" + transcript +
+                "Keep continuity; resolve short references against these earlier lines.";
+        }
+    }
+
+    // Route the commander to the stronger "Think" model (ModelThink) instead
+    // of the Fast model the ordinary roster bots use. Only CM pays the higher
+    // cost, and its answers/orchestration get noticeably smarter.
+    if (isCommander)
+    {
+        request.tier = ModelTier::Think;
     }
 
     LOG_DEBUG("llmbots.brain", "{}: submitting social call (event kind {})", m_name, static_cast<int>(event.kind));

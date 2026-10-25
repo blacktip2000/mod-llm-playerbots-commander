@@ -16,6 +16,7 @@
 
 #include "Bag.h"
 #include "DBCStores.h"
+#include "DatabaseEnv.h"
 #include "Group.h"
 #include "Item.h"
 #include "ItemTemplate.h"
@@ -642,6 +643,38 @@ std::vector<ToolSpec> const& CommanderToolSpecs()
             R"("description":"Exact raid role and talent specialization. Main/off tank are distinguished as raid assignments even when they use the same tank talent preset."},)"
             R"("level":{"type":"integer","minimum":1,"maximum":80,"description":"Target character level for preparation."}},)"
             R"("required":["target","role","level"],"additionalProperties":false})" });
+        out.push_back({ "command_group",
+            "Command several online Playerbots at once on behalf of the human speaking to you. "
+            "Use this to orchestrate the whole party/raid or a specific list of bots with a single "
+            "playerbot chat command (for example 'attack', 'follow', 'stay', 'flee'). "
+            "Prefer this over calling playerbot_command repeatedly for each bot.",
+            R"({"type":"object","properties":{)"
+            R"("scope":{"type":"string","enum":["group","named"],"description":"'group' targets every Playerbot in the human owner's party/raid; 'named' targets only the characters listed in targets."},)"
+            R"("targets":{"type":"array","items":{"type":"string"},"description":"Exact character names to command when scope is 'named'."},)"
+            R"("command":{"type":"string","description":"One playerbot chat command to run on each target, e.g. follow, stay, attack, flee."}},)"
+            R"("required":["scope","command"],"additionalProperties":false})" });
+        out.push_back({ "gm_give_item",
+            "Give an item to the human owner speaking to you, by item id. "
+            "Use only when the human explicitly asks you to give, create or spawn an item for them.",
+            R"({"type":"object","properties":{)"
+            R"("item_id":{"type":"integer","description":"The item template id to create."},)"
+            R"("count":{"type":"integer","minimum":1,"maximum":1000,"description":"How many to give (default 1)."}},)"
+            R"("required":["item_id"],"additionalProperties":false})" });
+        out.push_back({ "gm_summon_playerbot",
+            "Summon one online Playerbot to the human owner's location. "
+            "Use when the human asks to bring, summon or pull a specific bot to them. "
+            "This moves the bot to the owner; it never moves the owner.",
+            R"({"type":"object","properties":{)"
+            R"("target":{"type":"string","description":"Exact character name of the online Playerbot to summon."}},)"
+            R"("required":["target"],"additionalProperties":false})" });
+        out.push_back({ "query_database",
+            "Run one read-only SQL SELECT against a server database and return the rows. "
+            "Only a single SELECT statement is allowed (no semicolons). Results are capped at 50 rows. "
+            "Use for lookups the other tools do not expose, such as item ids, creature or quest data.",
+            R"({"type":"object","properties":{)"
+            R"("database":{"type":"string","enum":["world","characters","auth"],"description":"Which database to query."},)"
+            R"("sql":{"type":"string","description":"A single read-only SELECT statement without a trailing semicolon."}},)"
+            R"("required":["database","sql"],"additionalProperties":false})" });
         return out;
     }();
     return specs;
@@ -1240,6 +1273,270 @@ std::string ExecuteTool(Player* bot, ToolCall const& call, LlmChatLog const* cha
                 { "target", target->GetName() },
                 { "command", command },
                 { "issuer", issuer->GetName() }
+            }).dump();
+        }
+
+        if (call.name == "command_group")
+        {
+            if (!issuer)
+            {
+                return ErrorObject("command_group requires a human issuer speaking to the commander").dump();
+            }
+
+            std::string const scope = args.value("scope", "");
+            std::string const command = args.value("command", "");
+            if (command.empty())
+            {
+                return ErrorObject("command_group requires a command").dump();
+            }
+
+            std::vector<Player*> targets;
+
+            if (scope == "group")
+            {
+                Group* group = issuer->GetGroup();
+                if (!group)
+                {
+                    return ErrorObject("the human owner is not in a party or raid").dump();
+                }
+                for (Group::MemberSlot const& slot : group->GetMemberSlots())
+                {
+                    if (slot.guid == issuer->GetGUID())
+                    {
+                        continue;
+                    }
+                    if (Player* member = ObjectAccessor::FindPlayer(slot.guid))
+                    {
+                        targets.push_back(member);
+                    }
+                }
+            }
+            else if (scope == "named")
+            {
+                if (!args.contains("targets") || !args["targets"].is_array() || args["targets"].empty())
+                {
+                    return ErrorObject("command_group with scope 'named' requires a non-empty targets array").dump();
+                }
+                for (auto const& item : args["targets"])
+                {
+                    if (!item.is_string())
+                    {
+                        continue;
+                    }
+                    if (Player* t = ObjectAccessor::FindPlayerByName(item.get<std::string>(), false))
+                    {
+                        targets.push_back(t);
+                    }
+                }
+            }
+            else
+            {
+                return ErrorObject("command_group scope must be 'group' or 'named'").dump();
+            }
+
+            json results = json::array();
+            uint32 okCount = 0;
+            for (Player* target : targets)
+            {
+                PlayerbotAI* targetAi = GET_PLAYERBOT_AI(target);
+                if (!targetAi || !targetAi->GetAiObjectContext())
+                {
+                    results.push_back(json::object({
+                        { "target", target->GetName() }, { "ok", false }, { "reason", "not an active Playerbot" } }));
+                    continue;
+                }
+                ExternalEventHelper helper(targetAi->GetAiObjectContext());
+                bool const handled = helper.ParseChatCommand(command, issuer);
+                if (handled)
+                {
+                    ++okCount;
+                }
+                results.push_back(json::object({ { "target", target->GetName() }, { "ok", handled } }));
+            }
+
+            return json::object({
+                { "ok", okCount > 0 },
+                { "command", command },
+                { "scope", scope },
+                { "commanded", results.size() },
+                { "succeeded", okCount },
+                { "results", results },
+                { "issuer", issuer->GetName() }
+            }).dump();
+        }
+
+        if (call.name == "gm_give_item")
+        {
+            if (!issuer)
+            {
+                return ErrorObject("gm_give_item requires a human issuer speaking to the commander").dump();
+            }
+
+            uint32 const itemId = args.value("item_id", 0u);
+            uint32 count = args.value("count", 1u);
+            if (!itemId)
+            {
+                return ErrorObject("gm_give_item requires item_id").dump();
+            }
+
+            ItemTemplate const* proto = sObjectMgr->GetItemTemplate(itemId);
+            if (!proto)
+            {
+                return ErrorObject("no item template with id " + std::to_string(itemId)).dump();
+            }
+
+            if (count < 1) count = 1;
+            if (count > 1000) count = 1000;
+
+            if (!issuer->AddItem(itemId, count))
+            {
+                return ErrorObject("could not add item " + std::to_string(itemId) + " (bags full?)").dump();
+            }
+
+            return json::object({
+                { "ok", true },
+                { "item_id", itemId },
+                { "name", proto->Name1 },
+                { "count", count },
+                { "issuer", issuer->GetName() }
+            }).dump();
+        }
+
+        if (call.name == "gm_summon_playerbot")
+        {
+            if (!issuer)
+            {
+                return ErrorObject("gm_summon_playerbot requires a human issuer speaking to the commander").dump();
+            }
+
+            std::string const targetName = args.value("target", "");
+            if (targetName.empty())
+            {
+                return ErrorObject("gm_summon_playerbot requires target").dump();
+            }
+
+            Player* target = ObjectAccessor::FindPlayerByName(targetName, false);
+            if (!target)
+            {
+                return ErrorObject("target player '" + targetName + "' is not online").dump();
+            }
+
+            PlayerbotAI* targetAi = GET_PLAYERBOT_AI(target);
+            if (!targetAi || !targetAi->GetAiObjectContext())
+            {
+                return ErrorObject("target '" + targetName + "' is not an active Playerbot").dump();
+            }
+
+            if (!target->TeleportTo(
+                    issuer->GetMapId(),
+                    issuer->GetPositionX(),
+                    issuer->GetPositionY(),
+                    issuer->GetPositionZ(),
+                    issuer->GetOrientation()))
+            {
+                return ErrorObject("summon of '" + targetName + "' failed").dump();
+            }
+
+            return json::object({
+                { "ok", true },
+                { "target", target->GetName() },
+                { "issuer", issuer->GetName() },
+                { "map_id", issuer->GetMapId() }
+            }).dump();
+        }
+
+        if (call.name == "query_database")
+        {
+            if (!issuer)
+            {
+                return ErrorObject("query_database requires a human issuer speaking to the commander").dump();
+            }
+
+            std::string const database = args.value("database", "");
+            std::string sql = args.value("sql", "");
+
+            size_t const firstNon = sql.find_first_not_of(" \t\r\n");
+            if (firstNon == std::string::npos)
+            {
+                return ErrorObject("query_database requires a SELECT statement").dump();
+            }
+            sql = sql.substr(firstNon);
+
+            auto startsWithSelect = [](std::string const& s)
+            {
+                static std::string const kSelect = "select";
+                if (s.size() < kSelect.size())
+                {
+                    return false;
+                }
+                for (size_t i = 0; i < kSelect.size(); ++i)
+                {
+                    if (std::tolower(static_cast<unsigned char>(s[i])) != kSelect[i])
+                    {
+                        return false;
+                    }
+                }
+                return true;
+            };
+
+            if (!startsWithSelect(sql))
+            {
+                return ErrorObject("only SELECT statements are allowed").dump();
+            }
+            if (sql.find(';') != std::string::npos)
+            {
+                return ErrorObject("remove the ';' - only one statement is allowed").dump();
+            }
+
+            QueryResult result;
+            if (database == "world")
+            {
+                result = WorldDatabase.Query(sql.c_str());
+            }
+            else if (database == "characters")
+            {
+                result = CharacterDatabase.Query(sql.c_str());
+            }
+            else if (database == "auth")
+            {
+                result = LoginDatabase.Query(sql.c_str());
+            }
+            else
+            {
+                return ErrorObject("database must be 'world', 'characters' or 'auth'").dump();
+            }
+
+            if (!result)
+            {
+                return json::object({ { "ok", true }, { "row_count", 0 }, { "rows", json::array() } }).dump();
+            }
+
+            uint32 const fieldCount = result->GetFieldCount();
+            json rows = json::array();
+            uint32 const kMaxRows = 50;
+            uint32 count = 0;
+            do
+            {
+                Field* fields = result->Fetch();
+                json row = json::array();
+                for (uint32 i = 0; i < fieldCount; ++i)
+                {
+                    row.push_back(fields[i].Get<std::string>());
+                }
+                rows.push_back(std::move(row));
+                if (++count >= kMaxRows)
+                {
+                    break;
+                }
+            } while (result->NextRow());
+
+            return json::object({
+                { "ok", true },
+                { "database", database },
+                { "field_count", fieldCount },
+                { "row_count", count },
+                { "truncated", count >= kMaxRows },
+                { "rows", rows }
             }).dump();
         }
     }
