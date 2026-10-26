@@ -401,11 +401,14 @@ void LlmBotBrain::SubmitSocial(Player* player, LlmBotEvent const& event)
     // from the chat log. Recent() is newest-first and already includes the
     // line we are answering now (the whisper hook pushed it before queuing the
     // event), so drop that newest entry and render the rest oldest-first.
+    // Only drop it when it really is the line being answered: for non-whisper
+    // events, or when the owner sent a newer line meanwhile, keep everything.
     std::string transcript;
     if (m_chatLog)
     {
         std::vector<ChatLine> const recent = m_chatLog->Recent(m_guid, 12);
-        for (size_t i = recent.size(); i-- > 1; )
+        size_t const skip = (!recent.empty() && !recent[0].fromBot && recent[0].text == event.detail) ? 1 : 0;
+        for (size_t i = recent.size(); i-- > skip; )
         {
             ChatLine const& ln = recent[i];
             std::string const who = ln.fromBot ? m_name : ln.speaker;

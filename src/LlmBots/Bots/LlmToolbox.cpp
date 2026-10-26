@@ -1488,6 +1488,25 @@ std::string ExecuteTool(Player* bot, ToolCall const& call, LlmChatLog const* cha
                 return ErrorObject("remove the ';' - only one statement is allowed").dump();
             }
 
+            // A SELECT can still touch the filesystem or lock rows, and the
+            // results go to the LLM provider, so keep file I/O, locking and
+            // account credentials out of reach.
+            std::string lowered = sql;
+            std::transform(lowered.begin(), lowered.end(), lowered.begin(),
+                [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            for (char const* banned : { "outfile", "dumpfile", "load_file", "for update", "lock in share",
+                                        "salt", "verifier", "session_key", "totp_secret", "sha_pass_hash" })
+            {
+                if (lowered.find(banned) != std::string::npos)
+                {
+                    return ErrorObject(std::string("'") + banned + "' is not allowed in query_database").dump();
+                }
+            }
+            if (database == "auth" && lowered.find('*') != std::string::npos)
+            {
+                return ErrorObject("name the columns explicitly for the auth database (no '*')").dump();
+            }
+
             QueryResult result;
             if (database == "world")
             {

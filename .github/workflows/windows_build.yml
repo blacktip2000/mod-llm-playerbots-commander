@@ -2,7 +2,7 @@ name: windows-build
 
 on:
   push:
-    branches: [ "master", "test-staging" ]
+    branches: [ "master", "test-staging", "cm-pinned-core" ]
   pull_request:
     branches: [ "master", "test-staging" ]
   workflow_dispatch: {}
@@ -24,14 +24,18 @@ jobs:
     env:
       BOOST_ROOT: C:\local\boost_1_87_0
       CMAKE_GENERATOR: Ninja
-      CTOOLS_BUILD: all
+      CTOOLS_BUILD: none
 
     steps:
+      # Pinned to the core the live server runs: its data/sql/updates set
+      # matches the server's bundled sql-source exactly (newest db_world
+      # 2026_09_20_00), so swapping the binary applies no DB migrations and
+      # the fork compiles without chasing later core API changes.
       - name: Checkout AzerothCore
         uses: actions/checkout@v4
         with:
           repository: 'mod-playerbots/azerothcore-wotlk'
-          ref: ${{ (github.base_ref || github.ref_name) == 'test-staging' && 'test-staging' || 'Playerbot' }}
+          ref: '7f12e89ee5f467a50e62eba1d525eac7dc953d03'
           path: a
 
       # The LLM commander lives in THIS fork, which is a full mod-playerbots
@@ -46,16 +50,19 @@ jobs:
 
       # The running server also has these modules compiled in. Include them so
       # the rebuilt worldserver keeps the same statically-linked features.
-      - name: Checkout mod-ahbot
+      # Same module sources and revisions as the live server's sql-source.
+      - name: Checkout mod-ah-bot-plus
         uses: actions/checkout@v4
         with:
-          repository: 'azerothcore/mod-ahbot'
-          path: a/modules/mod-ahbot
+          repository: 'NathanHandley/mod-ah-bot-plus'
+          ref: 'f685832994c825f90aa5a3dc0e1620aa568e875b'
+          path: a/modules/mod-ah-bot-plus
 
       - name: Checkout mod-individual-progression
         uses: actions/checkout@v4
         with:
           repository: 'ZhengPeiRu21/mod-individual-progression'
+          ref: '723c510c685cca184d8b96b6c22452bd48fda23a'
           path: a/modules/mod-individual-progression
 
       - name: Move source tree to short path
@@ -132,7 +139,7 @@ jobs:
           CTYPE="Release"
           CSCRIPTS="static"
           CMODULES="static"
-          CTOOLS_BUILD="all"
+          CTOOLS_BUILD="none"
 
           CCUSTOMOPTIONS="-DBOOST_ROOT=C:/local/boost_1_87_0 -DOPENSSL_ROOT_DIR=C:/openssl -DOPENSSL_USE_STATIC_LIBS=FALSE -DCMAKE_RC_COMPILER=rc -DCMAKE_NINJA_FORCE_RESPONSE_FILE=ON -DCMAKE_NINJA_CMCLDEPS_RC=OFF -DCMAKE_C_USE_RESPONSE_FILE_FOR_OBJECTS=ON -DCMAKE_CXX_USE_RESPONSE_FILE_FOR_OBJECTS=ON -DCMAKE_C_USE_RESPONSE_FILE_FOR_INCLUDES=ON -DCMAKE_CXX_USE_RESPONSE_FILE_FOR_INCLUDES=ON -DCMAKE_C_USE_RESPONSE_FILE_FOR_LIBRARIES=ON -DCMAKE_CXX_USE_RESPONSE_FILE_FOR_LIBRARIES=ON"
           EOF
@@ -148,7 +155,7 @@ jobs:
         shell: bash
         working-directory: C:\ac
         run: |
-          export CTOOLS_BUILD=all
+          export CTOOLS_BUILD=none
           export CMAKE_GENERATOR=Ninja
 
           export CC=cl
