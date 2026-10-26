@@ -15,6 +15,7 @@
 #include "LlmChatLog.h"
 
 #include "Bag.h"
+#include "Chat.h"
 #include "DBCStores.h"
 #include "DatabaseEnv.h"
 #include "Group.h"
@@ -53,6 +54,55 @@ char const* kRaceNames[] = { "", "Human", "Orc", "Dwarf", "Night Elf", "Undead",
 
 // How far a bot can see other players for get_nearby_players.
 float const kLookRangeYards = 60.0f;
+
+// Runs GM commands through the owner's own session, so the core checks the
+// owner's security level exactly as if they had typed the command. Output is
+// still shown to the owner and is also captured for the model.
+class CapturingChatHandler : public ChatHandler
+{
+public:
+    explicit CapturingChatHandler(WorldSession* session) : ChatHandler(session) { }
+
+    void SendSysMessage(std::string_view str, bool escapeCharacters) override
+    {
+        if (m_output.size() < 2000)
+        {
+            m_output.append(str);
+            m_output.push_back('\n');
+        }
+        ChatHandler::SendSysMessage(str, escapeCharacters);
+    }
+    using ChatHandler::SendSysMessage;
+
+    std::string const& Output() const { return m_output; }
+
+private:
+    std::string m_output;
+};
+
+// Command families the commander may never run, even when the owner's GM
+// level would allow it: server control, accounts and punishments, permanent
+// world-DB edits, and anything that deletes characters or bots.
+bool IsBlockedGmCommand(std::string const& lowered)
+{
+    static std::vector<std::string> const kBlockedPrefixes = {
+        "server", "account", "ban", "unban", "kick", "reset", "reload", "gm", "rbac",
+        "mute", "unmute", "deserter", "pdump", "disable", "anticheat", "bf", "commands",
+        "character delete", "character erase", "character deleted", "character changeaccount",
+        "npc add", "npc delete", "npc set", "npc move", "gobject add", "gobject delete",
+        "gobject move", "gobject turn", "tele add", "tele del", "guild delete", "arena delete",
+        "playerbots rndbot", "playerbot rndbot", "llmbot", "wp", "waypoint"
+    };
+    for (std::string const& prefix : kBlockedPrefixes)
+    {
+        if (lowered.compare(0, prefix.size(), prefix) == 0 &&
+            (lowered.size() == prefix.size() || lowered[prefix.size()] == ' '))
+        {
+            return true;
+        }
+    }
+    return false;
+}
 
 // Session-only raid role assignments, separated by human account.
 // These are intentionally not persisted to the database.
@@ -675,6 +725,19 @@ std::vector<ToolSpec> const& CommanderToolSpecs()
             R"("database":{"type":"string","enum":["world","characters","auth"],"description":"Which database to query."},)"
             R"("sql":{"type":"string","description":"A single read-only SELECT statement without a trailing semicolon."}},)"
             R"("required":["database","sql"],"additionalProperties":false})" });
+        out.push_back({ "run_gm_command",
+            "Run one AzerothCore GM chat command as the human owner speaking to you, with the owner's own GM level. "
+            "Use this for anything the other tools do not cover, e.g. 'modify speed 3' (owner's run speed), "
+            "'modify fly 3', 'summon <name>' (bring a player to the owner), 'appear <name>' (owner goes to them), "
+            "'groupsummon <owner name>' (bring the owner's whole party to the owner), 'revive', 'cooldown', 'learn <spell id>', "
+            "'additem <id> <count>', 'tele <location>', 'levelup <n>'. "
+            "Commands that act on a unit use the owner's current target, or the owner when nothing is targeted; "
+            "prefer forms that take a character name when acting on someone else. "
+            "Server, account, ban/kick, reload/reset and permanent world-DB edits are blocked. "
+            "Read the returned output to confirm the result before telling the owner it worked.",
+            R"({"type":"object","properties":{)"
+            R"("command":{"type":"string","description":"The GM command without the leading dot, e.g. 'modify speed 3'."}},)"
+            R"("required":["command"],"additionalProperties":false})" });
         return out;
     }();
     return specs;
@@ -1443,6 +1506,48 @@ std::string ExecuteTool(Player* bot, ToolCall const& call, LlmChatLog const* cha
                 { "target", target->GetName() },
                 { "issuer", issuer->GetName() },
                 { "map_id", issuer->GetMapId() }
+            }).dump();
+        }
+
+        if (call.name == "run_gm_command")
+        {
+            if (!issuer || !issuer->GetSession())
+            {
+                return ErrorObject("run_gm_command requires a human issuer speaking to the commander").dump();
+            }
+
+            std::string command = args.value("command", "");
+            size_t const start = command.find_first_not_of(" \t.!");
+            if (start == std::string::npos)
+            {
+                return ErrorObject("run_gm_command requires a command").dump();
+            }
+            command = command.substr(start);
+            if (command.find_first_of("\r\n") != std::string::npos)
+            {
+                return ErrorObject("one command per call - no line breaks").dump();
+            }
+
+            std::string lowered = command;
+            std::transform(lowered.begin(), lowered.end(), lowered.begin(),
+                [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            if (IsBlockedGmCommand(lowered))
+            {
+                return ErrorObject("'" + command + "' is blocked for the commander; ask the owner to type it themselves").dump();
+            }
+
+            CapturingChatHandler handler(issuer->GetSession());
+            bool const handled = handler.ParseCommands("." + command);
+            if (!handled)
+            {
+                return ErrorObject("'." + command + "' is not a known command or the owner lacks the GM level for it").dump();
+            }
+
+            LOG_INFO("llmbots.brain", "commander ran GM command '.{}' as '{}'", command, issuer->GetName());
+            return json::object({
+                { "ok", !handler.HasSentErrorMessage() },
+                { "command", "." + command },
+                { "output", handler.Output() }
             }).dump();
         }
 
