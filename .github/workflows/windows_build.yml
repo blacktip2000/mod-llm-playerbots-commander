@@ -209,6 +209,23 @@ jobs:
             Get-ChildItem C:\openssl\bin -Filter *.dll -ErrorAction SilentlyContinue | ForEach-Object { Copy-Item $_.FullName $out -Force }
           }
 
+          # worldserver refuses to start unless libmysql.dll is the exact
+          # version it was compiled against (ACE00046), so ship the one from
+          # the MySQL install the build found.
+          $cache = Get-ChildItem -Path C:\ac -Recurse -Filter CMakeCache.txt -ErrorAction SilentlyContinue | Select-Object -First 1
+          $mysqlLib = $null
+          if ($cache) {
+            $line = Select-String -Path $cache.FullName -Pattern '^MYSQL_LIBRARY:FILEPATH=(.+)$' | Select-Object -First 1
+            if ($line) { $mysqlLib = $line.Matches[0].Groups[1].Value }
+          }
+          if ($mysqlLib) {
+            $dll = Join-Path (Split-Path $mysqlLib) 'libmysql.dll'
+            if (Test-Path $dll) { Copy-Item $dll $out -Force; Write-Host "libmysql.dll from $dll" }
+            else { Write-Host "libmysql.dll not next to $mysqlLib" }
+          } else {
+            Write-Host "MYSQL_LIBRARY not found in CMakeCache"
+          }
+
           Write-Host "--- artifact contents ---"
           Get-ChildItem $out | Select-Object Name,Length
 
