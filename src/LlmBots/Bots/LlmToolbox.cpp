@@ -650,16 +650,16 @@ std::vector<ToolSpec> const& CommanderToolSpecs()
             "Prefer this over calling playerbot_command repeatedly for each bot.",
             R"({"type":"object","properties":{)"
             R"("scope":{"type":"string","enum":["group","named"],"description":"'group' targets every Playerbot in the human owner's party/raid; 'named' targets only the characters listed in targets."},)"
-            R"("targets":{"type":"array","items":{"type":"string"},"description":"Exact character names to command when scope is 'named'."},)"
+            R"("targets":{"type":["array","null"],"items":{"type":"string"},"description":"Exact character names to command when scope is 'named'; null when scope is 'group'."},)"
             R"("command":{"type":"string","description":"One playerbot chat command to run on each target, e.g. follow, stay, attack, flee."}},)"
-            R"("required":["scope","command"],"additionalProperties":false})" });
+            R"("required":["scope","targets","command"],"additionalProperties":false})" });
         out.push_back({ "gm_give_item",
             "Give an item to the human owner speaking to you, by item id. "
             "Use only when the human explicitly asks you to give, create or spawn an item for them.",
             R"({"type":"object","properties":{)"
             R"("item_id":{"type":"integer","description":"The item template id to create."},)"
-            R"("count":{"type":"integer","minimum":1,"maximum":1000,"description":"How many to give (default 1)."}},)"
-            R"("required":["item_id"],"additionalProperties":false})" });
+            R"("count":{"type":["integer","null"],"minimum":1,"maximum":1000,"description":"How many to give; null for 1."}},)"
+            R"("required":["item_id","count"],"additionalProperties":false})" });
         out.push_back({ "gm_summon_playerbot",
             "Summon one online Playerbot to the human owner's location. "
             "Use when the human asks to bring, summon or pull a specific bot to them. "
@@ -1373,7 +1373,8 @@ std::string ExecuteTool(Player* bot, ToolCall const& call, LlmChatLog const* cha
             }
 
             uint32 const itemId = args.value("item_id", 0u);
-            uint32 count = args.value("count", 1u);
+            // Strict mode sends every key, so an omitted count arrives as null.
+            uint32 count = (args.contains("count") && args["count"].is_number_unsigned()) ? args["count"].get<uint32>() : 1u;
             if (!itemId)
             {
                 return ErrorObject("gm_give_item requires item_id").dump();
