@@ -16,6 +16,7 @@
 
 #include "Bag.h"
 #include "Chat.h"
+#include "Config.h"
 #include "DBCStores.h"
 #include "DatabaseEnv.h"
 #include "Group.h"
@@ -34,6 +35,8 @@
 #include "World.h"
 
 #include "json.hpp"
+
+#include "MySQLWorkaround.h"
 
 #include <algorithm>
 #include <cctype>
@@ -237,6 +240,121 @@ char const* RaceName(uint8 race)
 json ErrorObject(std::string const& message)
 {
     return json::object({ { "error", message } });
+}
+
+// The core's database pools abort the whole worldserver on an unknown column,
+// a missing table or a syntax error (they read it as an outdated schema), so
+// model-written SQL runs on its own short-lived connection where those errors
+// come back as ordinary messages the model can correct.
+json RunIsolatedSelect(std::string const& infoKey, std::string const& database, std::string const& sql)
+{
+    std::string const info = sConfigMgr->GetOption<std::string>(infoKey, "");
+    std::vector<std::string> parts;
+    size_t start = 0;
+    for (;;)
+    {
+        size_t const sep = info.find(';', start);
+        parts.push_back(info.substr(start, sep == std::string::npos ? std::string::npos : sep - start));
+        if (sep == std::string::npos)
+        {
+            break;
+        }
+        start = sep + 1;
+    }
+    if (parts.size() < 5)
+    {
+        return ErrorObject("database connection info is not configured");
+    }
+
+    MYSQL* mysql = mysql_init(nullptr);
+    if (!mysql)
+    {
+        return ErrorObject("could not initialise a database connection");
+    }
+
+    unsigned int timeoutSec = 5;
+    mysql_options(mysql, MYSQL_OPT_CONNECT_TIMEOUT, &timeoutSec);
+    mysql_options(mysql, MYSQL_OPT_READ_TIMEOUT, &timeoutSec);
+    mysql_options(mysql, MYSQL_SET_CHARSET_NAME, "utf8mb4");
+
+    uint32 const port = static_cast<uint32>(std::strtoul(parts[1].c_str(), nullptr, 10));
+    if (!mysql_real_connect(mysql, parts[0].c_str(), parts[2].c_str(), parts[3].c_str(), parts[4].c_str(),
+            port, nullptr, 0))
+    {
+        std::string const error = mysql_error(mysql);
+        mysql_close(mysql);
+        return ErrorObject("could not connect to the database: " + error);
+    }
+
+    // Belt and braces on top of the SELECT-only checks: no writes, no long scans.
+    mysql_query(mysql, "SET SESSION TRANSACTION READ ONLY");
+    mysql_query(mysql, "SET SESSION max_execution_time = 3000");
+
+    if (mysql_real_query(mysql, sql.data(), static_cast<unsigned long>(sql.size())) != 0)
+    {
+        std::string const error = mysql_error(mysql);
+        mysql_close(mysql);
+        return ErrorObject("SQL error: " + error +
+            " (check table and column names, e.g. SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = DATABASE() AND table_name = '...')");
+    }
+
+    MYSQL_RES* res = mysql_use_result(mysql);
+    if (!res)
+    {
+        mysql_close(mysql);
+        return json::object({ { "ok", true }, { "database", database }, { "row_count", 0 }, { "rows", json::array() } });
+    }
+
+    unsigned int const fieldCount = mysql_num_fields(res);
+    json columns = json::array();
+    MYSQL_FIELD* fields = mysql_fetch_fields(res);
+    for (unsigned int i = 0; i < fieldCount; ++i)
+    {
+        columns.push_back(fields[i].name ? fields[i].name : "");
+    }
+
+    json rows = json::array();
+    uint32 const kMaxRows = 50;
+    uint32 count = 0;
+    bool truncated = false;
+    while (MYSQL_ROW row = mysql_fetch_row(res))
+    {
+        if (count >= kMaxRows)
+        {
+            truncated = true;
+            break;
+        }
+        unsigned long* lengths = mysql_fetch_lengths(res);
+        json out = json::array();
+        for (unsigned int i = 0; i < fieldCount; ++i)
+        {
+            if (row[i])
+            {
+                out.push_back(std::string(row[i], lengths[i]));
+            }
+            else
+            {
+                out.push_back(nullptr);
+            }
+        }
+        rows.push_back(std::move(out));
+        ++count;
+    }
+
+    // Freeing a use_result set drains any rows left past the cap; the
+    // max_execution_time above bounds how long that can take.
+    mysql_free_result(res);
+    mysql_close(mysql);
+
+    return json::object({
+        { "ok", true },
+        { "database", database },
+        { "columns", columns },
+        { "row_count", count },
+        { "truncated", truncated },
+        { "rows", rows }
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -612,6 +730,10 @@ std::vector<ToolSpec> const& CommanderToolSpecs()
     static std::vector<ToolSpec> const specs = []
     {
         std::vector<ToolSpec> out;
+        out.push_back({ "get_owner_party",
+            "Who is in the human owner's party or raid, and which members are playerbots. "
+            "Call this to resolve \"my bots\" or \"my party\" before acting on each member by name.",
+            R"({"type":"object","properties":{},"required":[],"additionalProperties":false})" });
         out.push_back({ "playerbot_command",
             "Command one online Playerbot on behalf of the human speaking to you. Choose the target "
             "bot by its exact character name and translate the human's natural-language instruction "
@@ -722,7 +844,8 @@ std::vector<ToolSpec> const& CommanderToolSpecs()
         out.push_back({ "query_database",
             "Run one read-only SQL SELECT against a server database and return the rows. "
             "Only a single SELECT statement is allowed (no semicolons). Results are capped at 50 rows. "
-            "Use for lookups the other tools do not expose, such as item ids, creature or quest data.",
+            "Use for lookups the other tools do not expose, such as item ids, creature or quest data. "
+            "If you are not sure of a table's columns, look them up first in information_schema.columns.",
             R"({"type":"object","properties":{)"
             R"("database":{"type":"string","enum":["world","characters","auth"],"description":"Which database to query."},)"
             R"("sql":{"type":"string","description":"A single read-only SELECT statement without a trailing semicolon."}},)"
@@ -1585,6 +1708,21 @@ std::string ExecuteTool(Player* bot, ToolCall const& call, LlmChatLog const* cha
             }).dump();
         }
 
+        if (call.name == "get_owner_party")
+        {
+            if (!issuer)
+            {
+                return ErrorObject("get_owner_party requires a human issuer speaking to the commander").dump();
+            }
+            json party = ToolGroupMembers(issuer);
+            for (auto& member : party["members"])
+            {
+                Player* player = ObjectAccessor::FindPlayerByName(member["name"].get<std::string>(), false);
+                member["is_playerbot"] = player && GET_PLAYERBOT_AI(player) != nullptr;
+                member["is_owner"] = player == issuer;
+            }
+            return party.dump();
+        }
         if (call.name == "query_database")
         {
             if (!issuer)
@@ -1647,56 +1785,18 @@ std::string ExecuteTool(Player* bot, ToolCall const& call, LlmChatLog const* cha
                 return ErrorObject("name the columns explicitly for the auth database (no '*')").dump();
             }
 
-            QueryResult result;
-            if (database == "world")
-            {
-                result = WorldDatabase.Query(sql.c_str());
-            }
-            else if (database == "characters")
-            {
-                result = CharacterDatabase.Query(sql.c_str());
-            }
-            else if (database == "auth")
-            {
-                result = LoginDatabase.Query(sql.c_str());
-            }
-            else
+            char const* infoKey = database == "world" ? "WorldDatabaseInfo"
+                : database == "characters" ? "CharacterDatabaseInfo"
+                : database == "auth" ? "LoginDatabaseInfo"
+                : nullptr;
+            if (!infoKey)
             {
                 return ErrorObject("database must be 'world', 'characters' or 'auth'").dump();
             }
 
-            if (!result)
-            {
-                return json::object({ { "ok", true }, { "row_count", 0 }, { "rows", json::array() } }).dump();
-            }
-
-            uint32 const fieldCount = result->GetFieldCount();
-            json rows = json::array();
-            uint32 const kMaxRows = 50;
-            uint32 count = 0;
-            do
-            {
-                Field* fields = result->Fetch();
-                json row = json::array();
-                for (uint32 i = 0; i < fieldCount; ++i)
-                {
-                    row.push_back(fields[i].Get<std::string>());
-                }
-                rows.push_back(std::move(row));
-                if (++count >= kMaxRows)
-                {
-                    break;
-                }
-            } while (result->NextRow());
-
-            return json::object({
-                { "ok", true },
-                { "database", database },
-                { "field_count", fieldCount },
-                { "row_count", count },
-                { "truncated", count >= kMaxRows },
-                { "rows", rows }
-            }).dump();
+            // Row values are raw column bytes, so replace anything that is not
+            // valid UTF-8 rather than let dump() throw.
+            return RunIsolatedSelect(infoKey, database, sql).dump(-1, ' ', false, json::error_handler_t::replace);
         }
     }
     catch (std::exception const& e)
