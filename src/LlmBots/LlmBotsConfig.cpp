@@ -53,6 +53,8 @@ LlmBotsConfig LoadLlmBotsConfig()
     cfg.chroniclerName = sConfigMgr->GetOption<std::string>("LlmBots.Chronicler.Name", "");
     cfg.chroniclerDigestSec = sConfigMgr->GetOption<uint32_t>("LlmBots.Chronicler.DigestSec", 60);
 
+    cfg.language = sConfigMgr->GetOption<std::string>("LlmBots.Language", "Korean");
+
     return cfg;
 }
 

@@ -32,6 +32,13 @@ struct BotContext
     std::vector<std::string> memories; // durable reflections
 };
 
+// Language all bots speak in (from LlmBots.Language). Set once at startup.
+void SetReplyLanguage(std::string language);
+
+// One prompt line telling the model which language to speak, or "" when no
+// language is configured. Append it to every system prompt.
+std::string LanguageRule();
+
 // System prompt: persona, rules of engagement (schema, one line, in-fiction).
 std::string BuildSystemPrompt(Persona const& persona, BotContext const& context, ModelTier tier);
 

@@ -18,6 +18,7 @@
 #include "LlmClient.h"
 #include "LlmProvider.h"
 #include "LlmSchema.h"
+#include "PromptBuilder.h"
 
 #include "CharacterCache.h"
 #include "Item.h"
@@ -148,6 +149,7 @@ void LlmBotsModule::Initialize()
     m_client->Start(config.workerThreads, m_budget.get());
 
     m_conversations.Configure(config.conversationMaxTurns, /*maxConcurrent=*/3, /*pairCooldownSec=*/60);
+    SetReplyLanguage(config.language);
 
     // Chronicler (may be empty - optional).
     if (!config.chroniclerName.empty())

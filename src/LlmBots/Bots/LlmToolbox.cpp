@@ -30,6 +30,7 @@
 #include "RandomPlayerbotMgr.h"
 #include "QuestDef.h"
 #include "SharedDefines.h"
+#include "Util.h"
 #include "World.h"
 
 #include "json.hpp"
@@ -697,7 +698,8 @@ std::vector<ToolSpec> const& CommanderToolSpecs()
             "Command several online Playerbots at once on behalf of the human speaking to you. "
             "Use this to orchestrate the whole party/raid or a specific list of bots with a single "
             "playerbot chat command (for example 'attack', 'follow', 'stay', 'flee'). "
-            "Prefer this over calling playerbot_command repeatedly for each bot.",
+            "Prefer this over calling playerbot_command repeatedly for each bot. "
+            "It cannot run GM commands such as speed changes; use run_gm_command with each bot's name as target for those.",
             R"({"type":"object","properties":{)"
             R"("scope":{"type":"string","enum":["group","named"],"description":"'group' targets every Playerbot in the human owner's party/raid; 'named' targets only the characters listed in targets."},)"
             R"("targets":{"type":["array","null"],"items":{"type":"string"},"description":"Exact character names to command when scope is 'named'; null when scope is 'group'."},)"
@@ -727,17 +729,20 @@ std::vector<ToolSpec> const& CommanderToolSpecs()
             R"("required":["database","sql"],"additionalProperties":false})" });
         out.push_back({ "run_gm_command",
             "Run one AzerothCore GM chat command as the human owner speaking to you, with the owner's own GM level. "
-            "Use this for anything the other tools do not cover, e.g. 'modify speed 3' (owner's run speed), "
+            "Use this for anything the other tools do not cover, e.g. 'modify speed 3' (run speed), "
             "'modify fly 3', 'summon <name>' (bring a player to the owner), 'appear <name>' (owner goes to them), "
             "'groupsummon <owner name>' (bring the owner's whole party to the owner), 'revive', 'cooldown', 'learn <spell id>', "
-            "'additem <id> <count>', 'tele <location>', 'levelup <n>'. "
-            "Commands that act on a unit use the owner's current target, or the owner when nothing is targeted; "
-            "prefer forms that take a character name when acting on someone else. "
+            "'additem <id> <count>', 'tele <location>', 'levelup <n>', "
+            "'playerbots bot add <name>' (log in one of the owner's own or linked characters as a bot), "
+            "'playerbots bot remove <name>' (log that bot out). "
+            "Set target to choose who a unit command acts on: 'self' for the owner, an exact character name for "
+            "someone else (call once per character), or 'selection' only if the owner explicitly says 'my target'. "
             "Server, account, ban/kick, reload/reset and permanent world-DB edits are blocked. "
-            "Read the returned output to confirm the result before telling the owner it worked.",
+            "Read the returned output - it names who was affected - before telling the owner it worked.",
             R"({"type":"object","properties":{)"
-            R"("command":{"type":"string","description":"The GM command without the leading dot, e.g. 'modify speed 3'."}},)"
-            R"("required":["command"],"additionalProperties":false})" });
+            R"("command":{"type":"string","description":"The GM command without the leading dot, e.g. 'modify speed 3'."},)"
+            R"("target":{"type":"string","description":"'self', an exact online character name, or 'selection'."}},)"
+            R"("required":["command","target"],"additionalProperties":false})" });
         return out;
     }();
     return specs;
@@ -1536,17 +1541,46 @@ std::string ExecuteTool(Player* bot, ToolCall const& call, LlmChatLog const* cha
                 return ErrorObject("'" + command + "' is blocked for the commander; ask the owner to type it themselves").dump();
             }
 
+            // Point the owner's selection at the intended unit for the duration
+            // of the command, so commands like 'modify speed' never land on
+            // whoever the owner happens to have targeted.
+            std::string const targetArg = args.value("target", "self");
+            ObjectGuid commandTarget;
+            if (targetArg.empty() || StringEqualI(targetArg, "self"))
+            {
+                commandTarget = issuer->GetGUID();
+            }
+            else if (!StringEqualI(targetArg, "selection"))
+            {
+                Player* named = ObjectAccessor::FindPlayerByName(targetArg, false);
+                if (!named)
+                {
+                    return ErrorObject("target player '" + targetArg + "' is not online").dump();
+                }
+                commandTarget = named->GetGUID();
+            }
+
+            ObjectGuid const previousSelection = issuer->GetGuidValue(UNIT_FIELD_TARGET);
+            if (!commandTarget.IsEmpty())
+            {
+                issuer->SetSelection(commandTarget);
+            }
             CapturingChatHandler handler(issuer->GetSession());
             bool const handled = handler.ParseCommands("." + command);
+            if (!commandTarget.IsEmpty())
+            {
+                issuer->SetSelection(previousSelection);
+            }
             if (!handled)
             {
                 return ErrorObject("'." + command + "' is not a known command or the owner lacks the GM level for it").dump();
             }
 
-            LOG_INFO("llmbots.brain", "commander ran GM command '.{}' as '{}'", command, issuer->GetName());
+            LOG_INFO("llmbots.brain", "commander ran GM command '.{}' as '{}' on target '{}'", command, issuer->GetName(), targetArg);
             return json::object({
                 { "ok", !handler.HasSentErrorMessage() },
                 { "command", "." + command },
+                { "target", targetArg },
                 { "output", handler.Output() }
             }).dump();
         }

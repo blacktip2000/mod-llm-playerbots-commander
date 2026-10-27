@@ -128,3 +128,11 @@ LlmBots.Chronicler.Name =
 # Minimum seconds between chronicler digest refreshes. Whispers within the
 # cache window are answered from cache with zero LLM calls.
 LlmBots.Chronicler.DigestSec = 60
+
+# ---------------------------------------------------------------------------
+# Language
+# ---------------------------------------------------------------------------
+
+# Language every LLM bot (roster bots, CM, chronicler) speaks in, written in
+# English, e.g. Korean, English, German. Empty lets the model choose.
+LlmBots.Language = Korean

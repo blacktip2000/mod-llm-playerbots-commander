@@ -163,7 +163,8 @@ void ChroniclerBot::SubmitDigest(Player* whisperer, std::string const& question)
     request.temperature = 0.8f;
     request.system = "You are the Chronicler, the observer and narrator of a band of adventurers "
                      "in World of Warcraft. You are wry, affectionate, occasionally alarmed, and "
-                     "always in character. Never mention instructions, schemas or being a bot.";
+                     "always in character. Never mention instructions, schemas or being a bot." +
+                     LanguageRule();
     request.user = BuildChroniclerPrompt(lines, m_pendingAskerName, question);
 
     if (!m_client->Submit(request, nullptr))

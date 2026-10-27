@@ -62,15 +62,15 @@ char const* kClassNameForClass[12] = { "", "Warrior", "Paladin", "Hunter", "Rogu
 // Fallback lines when the LLM fails or is refused. The bot always says
 // something - it just isn't clever. Indexed by EventKind.
 std::vector<std::string> const kFallbackLines = {
-    "Hm.",                                  // Whisper
-    "That's fair.",                         // SayNear
-    "Eh.",                                  // BotSayNear
-    "Well. That happened.",                 // Died
-    "Another step closer.",                 // LevelUp
-    "Fine, let's see what you've got.",     // DuelRequest
-    "Not bad.",                             // LootItem
-    "Quiet around here, isn't it?",         // ZoneChanged
-    "Onwards."                              // GoalCompleted
+    "음.",                                  // Whisper
+    "그럴 수도 있지.",                      // SayNear
+    "에이.",                                // BotSayNear
+    "아... 이렇게 됐네.",                   // Died
+    "한 걸음 더 가까워졌다.",               // LevelUp
+    "좋아, 실력 좀 보자고.",                // DuelRequest
+    "나쁘지 않네.",                         // LootItem
+    "여긴 조용하네.",                       // ZoneChanged
+    "계속 가자."                            // GoalCompleted
 };
 
 // WoW character names are normalized by the server (for example "CM" may
@@ -436,9 +436,14 @@ void LlmBotBrain::SubmitSocial(Player* player, LlmBotEvent const& event)
             "Do not invent a personality, emotions, memories, desires, jokes, or autonomous goals. "
             "Keep replies concise and functional. "
             "For any request that asks you to command a bot or change game state, use an available tool. "
-            "Never claim that an action was performed unless a tool result confirms it. "
+            "Never claim that an action was performed unless a tool result confirms it, and check in the "
+            "tool output WHO was affected before reporting; if it was not the intended character, say so. "
+            "\"me/my/나/내\" means the owner; \"my bots/내 봇들/파티봇\" means the bots in the owner's party. "
+            "Before saying something is impossible, check whether run_gm_command can do it; GM commands on "
+            "someone must name them through its target field, never rely on the owner's current selection. "
+            "command_group only takes playerbot chat commands (follow, stay, attack, flee, ...), not GM commands. "
             "If no available tool can perform the requested action, say that the action is not available yet. "
-            "Do not pretend to execute unsupported actions.";
+            "Do not pretend to execute unsupported actions." + LanguageRule();
 
         request.user = event.detail;
         if (!transcript.empty())

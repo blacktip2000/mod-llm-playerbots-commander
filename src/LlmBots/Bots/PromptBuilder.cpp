@@ -49,7 +49,27 @@ std::string SelfAwarenessLine(uint8_t level)
     }
 }
 
+std::string g_replyLanguage;
+
 } // namespace
+
+void SetReplyLanguage(std::string language)
+{
+    g_replyLanguage = std::move(language);
+}
+
+std::string LanguageRule()
+{
+    if (g_replyLanguage.empty())
+    {
+        return "";
+    }
+    return "\nAlways write every line you say, and every narrative or digest, in " + g_replyLanguage +
+        ", whatever language the game events or other speakers use. Keep character names, item "
+        "names and commands exactly as given. Game chat is cut at about 240 bytes and non-Latin "
+        "scripts such as Korean take 3 bytes per character, so keep each chat line under 70 "
+        "characters.";
+}
 
 std::string BuildSystemPrompt(Persona const& persona, BotContext const& context, ModelTier tier)
 {
@@ -66,6 +86,7 @@ std::string BuildSystemPrompt(Persona const& persona, BotContext const& context,
         out += "Current goal: " + context.goal + "\n";
     }
     out += tier == ModelTier::Think ? kAgendaRules : kUtteranceRules;
+    out += LanguageRule();
     return out;
 }
 

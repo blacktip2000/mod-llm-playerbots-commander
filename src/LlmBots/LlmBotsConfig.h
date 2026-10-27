@@ -66,6 +66,9 @@ struct LlmBotsConfig
     // Chronicler.
     std::string chroniclerName;
     uint32_t chroniclerDigestSec = 60;
+
+    // Language every LLM bot speaks in (empty = whatever the model picks).
+    std::string language = "Korean";
 };
 
 // Reads every option from sConfigMgr. Call once at module startup.
