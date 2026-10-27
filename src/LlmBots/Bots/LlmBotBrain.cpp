@@ -107,27 +107,79 @@ uint32_t EmoteIdFor(std::string const& emote)
 }
 
 // WoW chat drops messages over 255 bytes and the client truncates anything
-// longer. Cap by characters for style, then by bytes on a UTF-8 boundary so
-// no multibyte character is ever split mid-sequence.
+// longer. Leave headroom under that for the chat packet.
+uint32_t constexpr kMaxLineBytes = 240;
+
+bool IsUtf8Continuation(char c)
+{
+    return (static_cast<uint8_t>(c) & 0xC0) == 0x80;
+}
+
+// Byte offset just past the first maxChars UTF-8 characters (or size()).
+size_t Utf8PrefixBytes(std::string const& text, size_t maxChars)
+{
+    size_t chars = 0;
+    for (size_t i = 0; i < text.size(); ++i)
+    {
+        if (!IsUtf8Continuation(text[i]) && chars++ == maxChars)
+        {
+            return i;
+        }
+    }
+    return text.size();
+}
+
+// Cut to at most maxBytes, backing up to a character boundary so no
+// multibyte character (e.g. Korean, 3 bytes) is ever split mid-sequence.
+void TruncateUtf8(std::string& text, size_t maxBytes)
+{
+    if (text.size() <= maxBytes)
+    {
+        return;
+    }
+    size_t cut = maxBytes;
+    while (cut > 0 && IsUtf8Continuation(text[cut]))
+    {
+        --cut;
+    }
+    text.resize(cut);
+}
+
+// One chat line: at most 160 characters for style, and the byte cap.
 void ClampLine(std::string& line)
 {
-    if (line.size() > 160)
+    line.resize(Utf8PrefixBytes(line, 160));
+    TruncateUtf8(line, kMaxLineBytes);
+}
+
+// Split a long reply into chat-sized parts, preferring to break at a space,
+// never inside a UTF-8 character. Anything past maxParts is dropped.
+std::vector<std::string> SplitForChat(std::string text, size_t maxParts)
+{
+    std::vector<std::string> parts;
+    while (!text.empty() && parts.size() < maxParts)
     {
-        line.resize(160);
-    }
-    uint32_t constexpr kMaxLineBytes = 240;
-    if (line.size() > kMaxLineBytes)
-    {
-        line.resize(kMaxLineBytes);
-        while (!line.empty() && (static_cast<uint8_t>(line.back()) & 0xC0) == 0x80)
+        if (text.size() <= kMaxLineBytes)
         {
-            line.pop_back();
+            parts.push_back(text);
+            break;
         }
-        if (!line.empty())
+        std::string head = text.substr(0, kMaxLineBytes + 1);
+        TruncateUtf8(head, kMaxLineBytes);
+        size_t const space = head.find_last_of(' ');
+        if (space != std::string::npos && space > head.size() / 2)
         {
-            line.pop_back(); // drop the incomplete lead byte
+            head.resize(space);
         }
+        parts.push_back(head);
+        size_t next = head.size();
+        while (next < text.size() && text[next] == ' ')
+        {
+            ++next;
+        }
+        text.erase(0, next);
     }
+    return parts;
 }
 
 } // namespace
@@ -673,7 +725,24 @@ void LlmBotBrain::ApplyUtterance(Player* player, LlmResponse const& response, Ll
         std::string emote = parsed.contains("emote") && !parsed["emote"].is_null() ? parsed["emote"].get<std::string>() : "";
         std::string channel = parsed.value("channel", "say");
 
-        ClampLine(line);
+        // CM answers questions, so a long whispered answer is sent in several
+        // chat-sized parts instead of being cut off; everyone else gets one line.
+        bool const splitReply = event.kind == EventKind::Whisper && EqualsIgnoreCase(m_name, m_commanderName);
+        std::vector<std::string> parts;
+        if (splitReply)
+        {
+            parts = SplitForChat(line, 4);
+            line.clear();
+            for (std::string const& part : parts)
+            {
+                line += (line.empty() ? "" : " ") + part;
+            }
+        }
+        else
+        {
+            ClampLine(line);
+            parts.push_back(line);
+        }
         if (line.empty())
         {
             FallbackLine(player, event);
@@ -706,7 +775,10 @@ void LlmBotBrain::ApplyUtterance(Player* player, LlmResponse const& response, Ll
             }
             else if (channel == "whisper" && event.kind == EventKind::Whisper)
             {
-                ai->Whisper(line, event.subject);
+                for (std::string const& part : parts)
+                {
+                    ai->Whisper(part, event.subject);
+                }
             }
             else if (channel == "party")
             {

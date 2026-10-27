@@ -141,7 +141,7 @@ LlmResponse FoundryProvider::Complete(LlmRequest const& request)
     auto doCall = [&](std::string const& tokenParam) -> HttpResponse
     {
         body[tokenParam] = request.maxOutputTokens;
-        return HttpsPostJson(m_host, m_port, path, body.dump(), headers, m_timeoutMs);
+        return HttpsPostJson(m_host, m_port, path, body.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace), headers, m_timeoutMs);
     };
 
     HttpResponse res = doCall("max_completion_tokens");

@@ -165,13 +165,30 @@ void LlmClient::WorkerLoop()
             m_budget->OnDequeued();
         }
 
-        LlmResponse response = m_provider->Complete(pending.request);
+        // An exception escaping this worker thread would terminate the whole
+        // worldserver, so any provider failure becomes an ordinary error here.
+        auto const complete = [this](LlmRequest const& request) {
+            try
+            {
+                return m_provider->Complete(request);
+            }
+            catch (std::exception const& e)
+            {
+                LlmResponse failed;
+                failed.ok = false;
+                failed.errorKind = ErrorKind::Permanent;
+                failed.error = std::string("provider threw: ") + e.what();
+                return failed;
+            }
+        };
+
+        LlmResponse response = complete(pending.request);
 
         // One retry on transient failures (429/5xx/network), jittered.
         if (!response.ok && response.errorKind == ErrorKind::Transient && pending.request.purpose != Purpose::Test)
         {
             std::this_thread::sleep_for(std::chrono::milliseconds(BackoffMs(0)));
-            response = m_provider->Complete(pending.request);
+            response = complete(pending.request);
         }
 
         if (!response.ok)

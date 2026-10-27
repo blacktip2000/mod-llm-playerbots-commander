@@ -209,7 +209,7 @@ LlmResponse OpenAiProvider::Complete(LlmRequest const& request)
         { "Content-Type", "application/json" }
     };
 
-    HttpResponse res = HttpsPostJson(m_host, m_port, path, body.dump(), headers, m_timeoutMs);
+    HttpResponse res = HttpsPostJson(m_host, m_port, path, body.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace), headers, m_timeoutMs);
 
     response.latencyMs = static_cast<uint32_t>(
         std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
@@ -302,7 +302,7 @@ LlmResponse OpenAiProvider::Complete(LlmRequest const& request)
                 input.push_back(item);
             }
             response.needsTools = true;
-            response.transcript = input.dump();
+            response.transcript = input.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
             response.ok = true;
             return response;
         }

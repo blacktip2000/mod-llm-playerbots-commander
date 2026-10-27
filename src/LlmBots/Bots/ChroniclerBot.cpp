@@ -205,15 +205,13 @@ void ChroniclerBot::ApplyCompletion(LlmResponse const& response)
         uint32_t constexpr kMaxDigestBytes = 240;
         if (digest.size() > kMaxDigestBytes)
         {
-            digest.resize(kMaxDigestBytes);
-            while (!digest.empty() && (static_cast<uint8_t>(digest.back()) & 0xC0) == 0x80)
+            // Back up to the start of the character that would be split.
+            size_t cut = kMaxDigestBytes;
+            while (cut > 0 && (static_cast<uint8_t>(digest[cut]) & 0xC0) == 0x80)
             {
-                digest.pop_back();
+                --cut;
             }
-            if (!digest.empty())
-            {
-                digest.pop_back(); // drop the incomplete lead byte
-            }
+            digest.resize(cut);
         }
 
         {
